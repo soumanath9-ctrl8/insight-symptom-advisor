@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { streamText, Output } from "ai";
+import { streamText } from "ai";
 import { z } from "zod";
 
 const AssessmentInput = z.object({
