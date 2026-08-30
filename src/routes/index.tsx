@@ -11,7 +11,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -60,7 +59,12 @@ function Index() {
 
   const run = useServerFn(assessSymptoms);
   const mutation = useMutation({
-    mutationFn: (input: { symptoms: string; age?: string; sex?: string; duration?: string }) =>
+    mutationFn: (input: {
+      symptoms: string;
+      age?: string | undefined;
+      sex?: string | undefined;
+      duration?: string | undefined;
+    }) =>
       run({ data: input }),
   });
 
@@ -188,11 +192,12 @@ function Index() {
                           {c.riskLevel} risk · {Math.round(c.likelihood)}%
                         </span>
                       </div>
-                      <Progress
-                        value={Math.min(100, Math.max(0, c.likelihood))}
-                        className="h-2"
-                        indicatorClassName={cls.bg}
-                      />
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                        <div
+                          className={`h-full rounded-full transition-all ${cls.bg}`}
+                          style={{ width: `${Math.min(100, Math.max(0, c.likelihood))}%` }}
+                        />
+                      </div>
                       <p className="text-sm leading-relaxed text-foreground/90">{c.explanation}</p>
                       {c.matchingSymptoms.length > 0 && (
                         <div className="flex flex-wrap gap-2">
