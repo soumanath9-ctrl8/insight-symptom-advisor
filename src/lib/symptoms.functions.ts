@@ -66,9 +66,13 @@ export const assessSymptoms = createServerFn({ method: "POST" })
       system: [
         "You are a careful clinical triage assistant.",
         "Given symptoms, list 3-5 plausible conditions ranked by likelihood (0-100 integer, not necessarily summing to 100).",
-        'riskLevel must be exactly one of: "low", "moderate", "high". urgency must be exactly one of: "self-care", "see-a-doctor", "urgent", "emergency".',
         "Explain in plain language WHY each condition fits or doesn't, referencing the reported symptoms.",
         "Be honest about uncertainty. Never claim a diagnosis. Flag emergency signs clearly.",
+        "Reply with ONLY a JSON object (no markdown fences) of this exact shape:",
+        '{"summary": string, "urgency": "self-care" | "see-a-doctor" | "urgent" | "emergency",',
+        '"urgencyReason": string, "conditions": [{"name": string, "riskLevel": "low" | "moderate" | "high",',
+        '"likelihood": number, "explanation": string, "matchingSymptoms": string[], "nextSteps": string}],',
+        '"redFlags": string[], "generalAdvice": string}',
       ].join(" "),
       prompt: [
         `Symptoms: ${data.symptoms}`,
@@ -78,10 +82,16 @@ export const assessSymptoms = createServerFn({ method: "POST" })
       ]
         .filter(Boolean)
         .join("\n"),
-      output: Output.object({ schema: AssessmentSchema }),
     });
 
-    const raw = await result.output;
+    const text = await result.text;
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start === -1 || end <= start) {
+      throw new Error("The AI response could not be read. Please try again.");
+    }
+
+    const raw = AssessmentSchema.parse(JSON.parse(text.slice(start, end + 1)));
     return {
       ...raw,
       urgency: normalizeUrgency(raw.urgency),
@@ -91,3 +101,4 @@ export const assessSymptoms = createServerFn({ method: "POST" })
       })),
     } satisfies Assessment;
   });
+
