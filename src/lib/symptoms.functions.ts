@@ -11,7 +11,7 @@ const AssessmentInput = z.object({
 
 const ConditionSchema = z.object({
   name: z.string(),
-  riskLevel: z.enum(["low", "moderate", "high"]),
+  riskLevel: z.string(),
   likelihood: z.number(),
   explanation: z.string(),
   matchingSymptoms: z.array(z.string()),
@@ -20,14 +20,37 @@ const ConditionSchema = z.object({
 
 const AssessmentSchema = z.object({
   summary: z.string(),
-  urgency: z.enum(["self-care", "see-a-doctor", "urgent", "emergency"]),
+  urgency: z.string(),
   urgencyReason: z.string(),
   conditions: z.array(ConditionSchema),
   redFlags: z.array(z.string()),
   generalAdvice: z.string(),
 });
 
-export type Assessment = z.infer<typeof AssessmentSchema>;
+type RawAssessment = z.infer<typeof AssessmentSchema>;
+
+export type RiskLevel = "low" | "moderate" | "high";
+export type Urgency = "self-care" | "see-a-doctor" | "urgent" | "emergency";
+
+export type Assessment = Omit<RawAssessment, "urgency" | "conditions"> & {
+  urgency: Urgency;
+  conditions: Array<Omit<RawAssessment["conditions"][number], "riskLevel"> & { riskLevel: RiskLevel }>;
+};
+
+function normalizeRisk(value: string): RiskLevel {
+  const v = value.toLowerCase();
+  if (v.includes("high") || v.includes("severe")) return "high";
+  if (v.includes("mod") || v.includes("medium")) return "moderate";
+  return "low";
+}
+
+function normalizeUrgency(value: string): Urgency {
+  const v = value.toLowerCase();
+  if (v.includes("emerg")) return "emergency";
+  if (v.includes("urgent")) return "urgent";
+  if (v.includes("doctor") || v.includes("clinic") || v.includes("gp")) return "see-a-doctor";
+  return "self-care";
+}
 
 export const assessSymptoms = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => AssessmentInput.parse(input))
@@ -43,6 +66,7 @@ export const assessSymptoms = createServerFn({ method: "POST" })
       system: [
         "You are a careful clinical triage assistant.",
         "Given symptoms, list 3-5 plausible conditions ranked by likelihood (0-100 integer, not necessarily summing to 100).",
+        'riskLevel must be exactly one of: "low", "moderate", "high". urgency must be exactly one of: "self-care", "see-a-doctor", "urgent", "emergency".',
         "Explain in plain language WHY each condition fits or doesn't, referencing the reported symptoms.",
         "Be honest about uncertainty. Never claim a diagnosis. Flag emergency signs clearly.",
       ].join(" "),
@@ -57,5 +81,13 @@ export const assessSymptoms = createServerFn({ method: "POST" })
       output: Output.object({ schema: AssessmentSchema }),
     });
 
-    return (await result.output) as Assessment;
+    const raw = await result.output;
+    return {
+      ...raw,
+      urgency: normalizeUrgency(raw.urgency),
+      conditions: raw.conditions.map((c) => ({
+        ...c,
+        riskLevel: normalizeRisk(c.riskLevel),
+      })),
+    } satisfies Assessment;
   });
