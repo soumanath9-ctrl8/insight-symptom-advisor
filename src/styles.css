@@ -111,6 +111,10 @@
 
 
 .dark {
+  --surface: oklch(0.24 0.03 195);
+  --risk-low: oklch(0.68 0.14 155);
+  --risk-moderate: oklch(0.78 0.15 75);
+  --risk-high: oklch(0.66 0.19 25);
   --background: oklch(0.129 0.042 264.695);
   --foreground: oklch(0.984 0.003 247.858);
   --card: oklch(0.208 0.042 265.755);
@@ -153,5 +157,6 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
+    font-family: var(--font-sans);
   }
 }
