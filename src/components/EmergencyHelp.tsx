@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AmbulanceIcon, MapPin, Navigation, Phone } from "lucide-react";
+import { Ambulance, MapPin, Navigation, Phone } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -86,7 +86,7 @@ export function EmergencyHelp() {
     <Card className="border-destructive/40 bg-destructive/5 shadow-soft">
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-base text-destructive">
-          <AmbulanceIcon className="size-4" /> {t.emergencyTitle}
+          <Ambulance className="size-4" /> {t.emergencyTitle}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
