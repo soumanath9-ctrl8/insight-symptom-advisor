@@ -40,7 +40,13 @@ export function SymptomTimeline({
             <LineChart data={data} margin={{ top: 8, right: 12, bottom: 4, left: -18 }}>
               <CartesianGrid stroke="var(--border)" vertical={false} />
               <XAxis dataKey="label" stroke="var(--muted-foreground)" fontSize={12} />
-              <YAxis domain={[0, 10]} stroke="var(--muted-foreground)" fontSize={12} />
+              <YAxis
+                domain={[0, 100]}
+                ticks={[0, 25, 50, 75, 100]}
+                tickFormatter={(v) => `${v}%`}
+                stroke="var(--muted-foreground)"
+                fontSize={12}
+              />
               <Tooltip
                 contentStyle={{
                   background: "var(--card)",
