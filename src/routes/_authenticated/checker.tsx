@@ -39,7 +39,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 
-export const Route = createFileRoute("/")({
+export const Route = createFileRoute("/_authenticated/checker")({
   head: () => ({
     meta: [
       { title: "SymptomScope — Calm AI Symptom Check & Risk Insight" },
