@@ -410,7 +410,7 @@ function AppBody() {
                             assessment: result,
                             symptoms: symptoms.trim(),
                             answers: answeredPairs,
-                            meta: { age, sex, duration, severity },
+                            meta: { age, sex, duration },
                           })
                         }
                       >
