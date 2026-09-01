@@ -26,7 +26,7 @@ export function SymptomTimeline({
 
   const data = entries.map((e) => ({
     label: new Date(e.date).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-    severity: e.severity,
+    risk: e.severity,
   }));
 
   return (
@@ -40,7 +40,13 @@ export function SymptomTimeline({
             <LineChart data={data} margin={{ top: 8, right: 12, bottom: 4, left: -18 }}>
               <CartesianGrid stroke="var(--border)" vertical={false} />
               <XAxis dataKey="label" stroke="var(--muted-foreground)" fontSize={12} />
-              <YAxis domain={[0, 10]} stroke="var(--muted-foreground)" fontSize={12} />
+              <YAxis
+                domain={[0, 100]}
+                ticks={[0, 25, 50, 75, 100]}
+                tickFormatter={(v) => `${v}%`}
+                stroke="var(--muted-foreground)"
+                fontSize={12}
+              />
               <Tooltip
                 contentStyle={{
                   background: "var(--card)",
@@ -52,7 +58,7 @@ export function SymptomTimeline({
               />
               <Line
                 type="monotone"
-                dataKey="severity"
+                dataKey="risk"
                 stroke="var(--primary)"
                 strokeWidth={2.5}
                 dot={{ r: 4, fill: "var(--primary)" }}
@@ -85,7 +91,7 @@ export function SymptomTimeline({
               </div>
               <p className="text-sm">{e.symptoms}</p>
               <p className="text-sm text-muted-foreground">
-                {e.topCondition} · {e.severity}/10
+                {e.topCondition} · {e.severity}% {t.riskSuffix}
               </p>
             </CardContent>
           </Card>

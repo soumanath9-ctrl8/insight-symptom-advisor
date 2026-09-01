@@ -32,7 +32,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Collapsible,
@@ -99,7 +98,6 @@ function AppBody() {
   const [age, setAge] = useState("");
   const [sex, setSex] = useState("");
   const [duration, setDuration] = useState("");
-  const [severity, setSeverity] = useState(4);
 
   const [stage, setStage] = useState<Stage>("intake");
   const [questions, setQuestions] = useState<FollowUpQuestion[]>([]);
@@ -120,7 +118,6 @@ function AppBody() {
     age: age.trim() || undefined,
     sex: sex.trim() || undefined,
     duration: duration.trim() || undefined,
-    severity,
     language: lang,
   });
 
@@ -280,18 +277,6 @@ function AppBody() {
                     </div>
                   </div>
 
-                  <div className="space-y-3">
-                    <Label>
-                      {t.severity} — <span className="text-primary">{severity}</span>
-                    </Label>
-                    <Slider
-                      min={1}
-                      max={10}
-                      step={1}
-                      value={[severity]}
-                      onValueChange={(v) => setSeverity(v[0] ?? 4)}
-                    />
-                  </div>
 
                   <Button
                     size="lg"
@@ -425,7 +410,7 @@ function AppBody() {
                             assessment: result,
                             symptoms: symptoms.trim(),
                             answers: answeredPairs,
-                            meta: { age, sex, duration, severity },
+                            meta: { age, sex, duration },
                           })
                         }
                       >
@@ -438,7 +423,6 @@ function AppBody() {
                         onClick={() => {
                           const next = addEntry({
                             symptoms: symptoms.trim(),
-                            severity,
                             assessment: result,
                           });
                           setHistory(next);

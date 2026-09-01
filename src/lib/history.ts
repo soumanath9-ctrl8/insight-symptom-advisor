@@ -27,18 +27,24 @@ function save(entries: HistoryEntry[]) {
   window.localStorage.setItem(KEY, JSON.stringify(entries));
 }
 
-export function addEntry(input: {
-  symptoms: string;
-  severity: number;
-  assessment: Assessment;
-}): HistoryEntry[] {
+export function topRisk(assessment: Assessment): { name: string; likelihood: number } {
+  const ranked = [...assessment.conditions].sort((a, b) => b.likelihood - a.likelihood);
+  const top = ranked[0];
+  return {
+    name: top?.name ?? "—",
+    likelihood: Math.max(0, Math.min(100, Math.round(top?.likelihood ?? 0))),
+  };
+}
+
+export function addEntry(input: { symptoms: string; assessment: Assessment }): HistoryEntry[] {
+  const top = topRisk(input.assessment);
   const entry: HistoryEntry = {
     id: `${Date.now()}`,
     date: new Date().toISOString(),
     symptoms: input.symptoms,
-    severity: input.severity,
+    severity: top.likelihood,
     urgency: input.assessment.urgency,
-    topCondition: input.assessment.conditions[0]?.name ?? "—",
+    topCondition: top.name,
     summary: input.assessment.summary,
   };
   const next = [...loadHistory(), entry].sort((a, b) => a.date.localeCompare(b.date));
