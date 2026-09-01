@@ -26,7 +26,7 @@ export function SymptomTimeline({
 
   const data = entries.map((e) => ({
     label: new Date(e.date).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-    severity: e.severity,
+    risk: e.severity,
   }));
 
   return (
@@ -58,7 +58,7 @@ export function SymptomTimeline({
               />
               <Line
                 type="monotone"
-                dataKey="severity"
+                dataKey="risk"
                 stroke="var(--primary)"
                 strokeWidth={2.5}
                 dot={{ r: 4, fill: "var(--primary)" }}
@@ -91,7 +91,7 @@ export function SymptomTimeline({
               </div>
               <p className="text-sm">{e.symptoms}</p>
               <p className="text-sm text-muted-foreground">
-                {e.topCondition} · {e.severity}/10
+                {e.topCondition} · {e.severity}% {t.riskSuffix}
               </p>
             </CardContent>
           </Card>
