@@ -52,7 +52,8 @@ export const STRINGS = {
     noneFound: "No facilities found nearby. Please call the emergency number.",
     historyTitle: "Symptom history",
     historyEmpty: "No entries yet. Complete a check and save it to build your timeline.",
-    severityOverTime: "Reported severity over time",
+    severityOverTime: "AI-assessed risk over time",
+    riskSuffix: "risk",
     entries: "Entries",
     remove: "Remove",
     disclaimer:
@@ -123,7 +124,8 @@ export const STRINGS = {
     noneFound: "কাছাকাছি কিছু পাওয়া যায়নি। ইমার্জেন্সি নম্বরে কল করুন।",
     historyTitle: "উপসর্গের ইতিহাস",
     historyEmpty: "এখনও কিছু নেই। একটি পরীক্ষা শেষ করে সংরক্ষণ করুন।",
-    severityOverTime: "সময়ের সঙ্গে তীব্রতা",
+    severityOverTime: "সময়ের সঙ্গে এআই-নির্ধারিত ঝুঁকি",
+    riskSuffix: "ঝুঁকি",
     entries: "এন্ট্রি",
     remove: "মুছুন",
     disclaimer:
