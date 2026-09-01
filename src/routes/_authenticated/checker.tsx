@@ -1,6 +1,6 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
@@ -12,6 +12,7 @@ import {
   MessageCircleQuestion,
   Save,
   Stethoscope,
+  LogOut,
 } from "lucide-react";
 
 import {
@@ -22,7 +23,9 @@ import {
   type FollowUpQuestion,
 } from "@/lib/symptoms.functions";
 import { LangContext, useLang, type Lang } from "@/lib/i18n";
-import { addEntry, loadHistory, removeEntry, type HistoryEntry } from "@/lib/history";
+import { topRisk, type HistoryEntry } from "@/lib/history";
+import { deleteCheck, getProfile, listChecks, saveCheck } from "@/lib/history.functions";
+import { supabase } from "@/integrations/supabase/client";
 import { openReport } from "@/lib/report";
 import { EmergencyHelp } from "@/components/EmergencyHelp";
 import { SymptomTimeline } from "@/components/SymptomTimeline";
@@ -105,10 +108,41 @@ function AppBody() {
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState("");
 
-  const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [savedId, setSavedId] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
-  useEffect(() => setHistory(loadHistory()), []);
+  const listFn = useServerFn(listChecks);
+  const saveFn = useServerFn(saveCheck);
+  const deleteFn = useServerFn(deleteCheck);
+  const profileFn = useServerFn(getProfile);
+
+  const historyQuery = useQuery({ queryKey: ["checks"], queryFn: () => listFn({}) });
+  const profileQuery = useQuery({ queryKey: ["profile"], queryFn: () => profileFn({}) });
+  const history: HistoryEntry[] = historyQuery.data ?? [];
+
+  const saveMutation = useMutation({
+    mutationFn: (vars: Parameters<typeof saveFn>[0]["data"]) => saveFn({ data: vars }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["checks"] }),
+  });
+  const removeMutation = useMutation({
+    mutationFn: (id: string) => deleteFn({ data: { id } }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["checks"] }),
+  });
+
+  async function handleSignOut() {
+    await queryClient.cancelQueries();
+    queryClient.clear();
+    await supabase.auth.signOut();
+    navigate({ to: "/auth", replace: true });
+  }
+
+  useEffect(() => {
+    const p = profileQuery.data;
+    if (!p) return;
+    if (p.age) setAge((prev) => prev || p.age!);
+    if (p.sex) setSex((prev) => prev || p.sex!);
+  }, [profileQuery.data]);
 
   const askFn = useServerFn(getFollowUpQuestions);
   const assessFn = useServerFn(assessSymptoms);
@@ -421,12 +455,15 @@ function AppBody() {
                         size="sm"
                         disabled={savedId !== null}
                         onClick={() => {
-                          const next = addEntry({
+                          const top = topRisk(result);
+                          saveMutation.mutate({
                             symptoms: symptoms.trim(),
-                            assessment: result,
+                            severity: top.likelihood,
+                            urgency: result.urgency,
+                            topCondition: top.name,
+                            summary: result.summary,
                           });
-                          setHistory(next);
-                          setSavedId(next[next.length - 1]?.id ?? "saved");
+                          setSavedId("saved");
                         }}
                       >
                         <Save className="mr-2 size-4" />
@@ -479,7 +516,7 @@ function AppBody() {
               <h2 className="font-display text-2xl">{t.historyTitle}</h2>
               <SymptomTimeline
                 entries={history}
-                onRemove={(id) => setHistory(removeEntry(id))}
+                onRemove={(id) => removeMutation.mutate(id)}
               />
             </div>
           </TabsContent>
