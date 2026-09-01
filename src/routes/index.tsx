@@ -438,7 +438,6 @@ function AppBody() {
                         onClick={() => {
                           const next = addEntry({
                             symptoms: symptoms.trim(),
-                            severity,
                             assessment: result,
                           });
                           setHistory(next);
