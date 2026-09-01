@@ -280,18 +280,6 @@ function AppBody() {
                     </div>
                   </div>
 
-                  <div className="space-y-3">
-                    <Label>
-                      {t.severity} — <span className="text-primary">{severity}</span>
-                    </Label>
-                    <Slider
-                      min={1}
-                      max={10}
-                      step={1}
-                      value={[severity]}
-                      onValueChange={(v) => setSeverity(v[0] ?? 4)}
-                    />
-                  </div>
 
                   <Button
                     size="lg"
