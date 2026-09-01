@@ -45,13 +45,13 @@ import {
 export const Route = createFileRoute("/_authenticated/checker")({
   head: () => ({
     meta: [
-      { title: "SymptomScope — Calm AI Symptom Check & Risk Insight" },
+      { title: "Symptom Check — SymptomScope Patient Dashboard" },
       {
         name: "description",
         content:
           "Describe your symptoms, answer a few doctor-style follow-up questions, and get a calibrated, plain-language risk assessment with self-care guidance in English or Bengali.",
       },
-      { property: "og:title", content: "SymptomScope — Calm AI Symptom Check & Risk Insight" },
+      { property: "og:title", content: "Symptom Check — SymptomScope Patient Dashboard" },
       {
         property: "og:description",
         content:
@@ -252,6 +252,14 @@ function AppBody() {
               </button>
             ))}
           </div>
+          <div className="flex items-center gap-3">
+            {profileQuery.data?.name ? (
+              <span className="text-sm text-muted-foreground">{profileQuery.data.name}</span>
+            ) : null}
+            <Button variant="ghost" size="sm" onClick={handleSignOut}>
+              <LogOut className="mr-2 size-4" /> Sign out
+            </Button>
+          </div>
         </header>
 
         <Tabs defaultValue="check">
@@ -444,7 +452,7 @@ function AppBody() {
                             assessment: result,
                             symptoms: symptoms.trim(),
                             answers: answeredPairs,
-                            meta: { age, sex, duration },
+                            meta: { age, sex, duration, name: profileQuery.data?.name ?? "" },
                           })
                         }
                       >
