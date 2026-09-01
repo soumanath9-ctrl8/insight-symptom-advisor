@@ -11,10 +11,11 @@ export function openReport(opts: {
   assessment: Assessment;
   symptoms: string;
   answers: { question: string; answer: string }[];
-  meta: { age?: string; sex?: string; duration?: string; severity?: number };
+  meta: { age?: string; sex?: string; duration?: string; severity?: number; name?: string };
 }) {
   const { t, lang, assessment: a, symptoms, answers, meta } = opts;
   const metaLine = [
+    meta.name ? `${t.reportFor}: ${meta.name}` : "",
     meta.age ? `${t.age}: ${meta.age}` : "",
     meta.sex ? `${t.sex}: ${meta.sex}` : "",
     meta.duration ? `${t.duration}: ${meta.duration}` : "",
