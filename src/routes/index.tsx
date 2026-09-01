@@ -32,7 +32,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Collapsible,
@@ -99,7 +98,6 @@ function AppBody() {
   const [age, setAge] = useState("");
   const [sex, setSex] = useState("");
   const [duration, setDuration] = useState("");
-  const [severity, setSeverity] = useState(4);
 
   const [stage, setStage] = useState<Stage>("intake");
   const [questions, setQuestions] = useState<FollowUpQuestion[]>([]);
@@ -120,7 +118,6 @@ function AppBody() {
     age: age.trim() || undefined,
     sex: sex.trim() || undefined,
     duration: duration.trim() || undefined,
-    severity,
     language: lang,
   });
 
