@@ -1,7 +1,7 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -12,7 +12,6 @@ import {
   MessageCircleQuestion,
   Save,
   Stethoscope,
-  LogOut,
 } from "lucide-react";
 
 import {
@@ -23,24 +22,23 @@ import {
   type FollowUpQuestion,
 } from "@/lib/symptoms.functions";
 import { LangContext, useLang, type Lang } from "@/lib/i18n";
-import { topRisk, type HistoryEntry } from "@/lib/history";
-import { deleteCheck, getProfile, listChecks, saveCheck } from "@/lib/history.functions";
-import { supabase } from "@/integrations/supabase/client";
+import { topRisk } from "@/lib/history";
+import { getProfile, saveCheck } from "@/lib/history.functions";
 import { openReport } from "@/lib/report";
 import { EmergencyHelp } from "@/components/EmergencyHelp";
-import { SymptomTimeline } from "@/components/SymptomTimeline";
+import { ProfileMenu } from "@/components/ProfileMenu";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+
 
 export const Route = createFileRoute("/_authenticated/checker")({
   head: () => ({
@@ -98,8 +96,6 @@ function AppBody() {
   const { lang, setLang, t } = useLang();
 
   const [symptoms, setSymptoms] = useState("");
-  const [age, setAge] = useState("");
-  const [sex, setSex] = useState("");
   const [duration, setDuration] = useState("");
 
   const [stage, setStage] = useState<Stage>("intake");
@@ -110,42 +106,22 @@ function AppBody() {
 
   const [savedId, setSavedId] = useState<string | null>(null);
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
 
-  const listFn = useServerFn(listChecks);
   const saveFn = useServerFn(saveCheck);
-  const deleteFn = useServerFn(deleteCheck);
   const profileFn = useServerFn(getProfile);
 
-  const historyQuery = useQuery({ queryKey: ["checks"], queryFn: () => listFn({}) });
   const profileQuery = useQuery({ queryKey: ["profile"], queryFn: () => profileFn({}) });
-  const history: HistoryEntry[] = historyQuery.data ?? [];
 
   const saveMutation = useMutation({
     mutationFn: (vars: Parameters<typeof saveFn>[0]["data"]) => saveFn({ data: vars }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["checks"] }),
   });
-  const removeMutation = useMutation({
-    mutationFn: (id: string) => deleteFn({ data: { id } }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["checks"] }),
-  });
-
-  async function handleSignOut() {
-    await queryClient.cancelQueries();
-    queryClient.clear();
-    await supabase.auth.signOut();
-    navigate({ to: "/auth", replace: true });
-  }
-
-  useEffect(() => {
-    const p = profileQuery.data;
-    if (!p) return;
-    if (p.age) setAge((prev) => prev || p.age!);
-    if (p.sex) setSex((prev) => prev || p.sex!);
-  }, [profileQuery.data]);
 
   const askFn = useServerFn(getFollowUpQuestions);
   const assessFn = useServerFn(assessSymptoms);
+
+  const age = profileQuery.data?.age ?? "";
+  const sex = profileQuery.data?.sex ?? "";
 
   const baseInput = () => ({
     symptoms: symptoms.trim(),
@@ -154,6 +130,8 @@ function AppBody() {
     duration: duration.trim() || undefined,
     language: lang,
   });
+
+
 
   const questionsMutation = useMutation({
     mutationFn: () => askFn({ data: baseInput() }),
@@ -221,8 +199,10 @@ function AppBody() {
 
   return (
     <main className="min-h-screen bg-background">
+      <ProfileMenu />
       <div className="mx-auto max-w-3xl px-5 py-10 sm:py-16">
-        <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
+        <header className="mb-8 flex flex-wrap items-start justify-between gap-4 pr-14">
+
           <div className="flex items-center gap-3">
             <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
               <Stethoscope className="size-5" />
@@ -252,23 +232,10 @@ function AppBody() {
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-3">
-            {profileQuery.data?.name ? (
-              <span className="text-sm text-muted-foreground">{profileQuery.data.name}</span>
-            ) : null}
-            <Button variant="ghost" size="sm" onClick={handleSignOut}>
-              <LogOut className="mr-2 size-4" /> Sign out
-            </Button>
-          </div>
         </header>
 
-        <Tabs defaultValue="check">
-          <TabsList className="mb-6">
-            <TabsTrigger value="check">{t.tabCheck}</TabsTrigger>
-            <TabsTrigger value="history">{t.tabHistory}</TabsTrigger>
-          </TabsList>
+        <div className="space-y-6">
 
-          <TabsContent value="check" className="space-y-6">
             {stage === "intake" && (
               <Card className="border-border/70 shadow-soft">
                 <CardHeader>
@@ -300,24 +267,15 @@ function AppBody() {
                     </div>
                   </div>
 
-                  <div className="grid gap-4 sm:grid-cols-3">
-                    <div className="space-y-2">
-                      <Label htmlFor="age">{t.age}</Label>
-                      <Input id="age" value={age} onChange={(e) => setAge(e.target.value)} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="sex">{t.sex}</Label>
-                      <Input id="sex" value={sex} onChange={(e) => setSex(e.target.value)} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="duration">{t.duration}</Label>
-                      <Input
-                        id="duration"
-                        value={duration}
-                        onChange={(e) => setDuration(e.target.value)}
-                      />
-                    </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="duration">{t.duration}</Label>
+                    <Input
+                      id="duration"
+                      value={duration}
+                      onChange={(e) => setDuration(e.target.value)}
+                    />
                   </div>
+
 
 
                   <Button
@@ -517,18 +475,8 @@ function AppBody() {
                 </Card>
               </section>
             )}
-          </TabsContent>
+        </div>
 
-          <TabsContent value="history">
-            <div className="space-y-4">
-              <h2 className="font-display text-2xl">{t.historyTitle}</h2>
-              <SymptomTimeline
-                entries={history}
-                onRemove={(id) => removeMutation.mutate(id)}
-              />
-            </div>
-          </TabsContent>
-        </Tabs>
 
         <p className="mt-10 rounded-xl bg-secondary px-4 py-3 text-xs leading-relaxed text-secondary-foreground">
           {t.disclaimer}
