@@ -504,18 +504,8 @@ function AppBody() {
                 </Card>
               </section>
             )}
-          </TabsContent>
+        </div>
 
-          <TabsContent value="history">
-            <div className="space-y-4">
-              <h2 className="font-display text-2xl">{t.historyTitle}</h2>
-              <SymptomTimeline
-                entries={history}
-                onRemove={(id) => removeMutation.mutate(id)}
-              />
-            </div>
-          </TabsContent>
-        </Tabs>
 
         <p className="mt-10 rounded-xl bg-secondary px-4 py-3 text-xs leading-relaxed text-secondary-foreground">
           {t.disclaimer}
