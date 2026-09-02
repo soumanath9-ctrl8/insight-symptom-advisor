@@ -287,24 +287,15 @@ function AppBody() {
                     </div>
                   </div>
 
-                  <div className="grid gap-4 sm:grid-cols-3">
-                    <div className="space-y-2">
-                      <Label htmlFor="age">{t.age}</Label>
-                      <Input id="age" value={age} onChange={(e) => setAge(e.target.value)} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="sex">{t.sex}</Label>
-                      <Input id="sex" value={sex} onChange={(e) => setSex(e.target.value)} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="duration">{t.duration}</Label>
-                      <Input
-                        id="duration"
-                        value={duration}
-                        onChange={(e) => setDuration(e.target.value)}
-                      />
-                    </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="duration">{t.duration}</Label>
+                    <Input
+                      id="duration"
+                      value={duration}
+                      onChange={(e) => setDuration(e.target.value)}
+                    />
                   </div>
+
 
 
                   <Button
