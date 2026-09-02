@@ -53,7 +53,24 @@ const FEATURES = [
 ];
 
 function Landing() {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    let active = true;
+    void supabase.auth.getSession().then(({ data }) => {
+      if (active && data.session) navigate({ to: "/checker", replace: true });
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      if (session) navigate({ to: "/checker", replace: true });
+    });
+    return () => {
+      active = false;
+      sub.subscription.unsubscribe();
+    };
+  }, [navigate]);
+
   return (
+
     <main className="min-h-screen bg-background">
       <div className="mx-auto max-w-3xl px-5 py-14 sm:py-20">
         <header className="mb-10 flex items-center gap-3">
