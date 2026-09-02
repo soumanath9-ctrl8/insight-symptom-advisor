@@ -1,7 +1,7 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -12,7 +12,6 @@ import {
   MessageCircleQuestion,
   Save,
   Stethoscope,
-  LogOut,
 } from "lucide-react";
 
 import {
@@ -23,24 +22,23 @@ import {
   type FollowUpQuestion,
 } from "@/lib/symptoms.functions";
 import { LangContext, useLang, type Lang } from "@/lib/i18n";
-import { topRisk, type HistoryEntry } from "@/lib/history";
-import { deleteCheck, getProfile, listChecks, saveCheck } from "@/lib/history.functions";
-import { supabase } from "@/integrations/supabase/client";
+import { topRisk } from "@/lib/history";
+import { getProfile, saveCheck } from "@/lib/history.functions";
 import { openReport } from "@/lib/report";
 import { EmergencyHelp } from "@/components/EmergencyHelp";
-import { SymptomTimeline } from "@/components/SymptomTimeline";
+import { ProfileMenu } from "@/components/ProfileMenu";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+
 
 export const Route = createFileRoute("/_authenticated/checker")({
   head: () => ({
