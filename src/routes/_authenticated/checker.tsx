@@ -96,8 +96,6 @@ function AppBody() {
   const { lang, setLang, t } = useLang();
 
   const [symptoms, setSymptoms] = useState("");
-  const [age, setAge] = useState("");
-  const [sex, setSex] = useState("");
   const [duration, setDuration] = useState("");
 
   const [stage, setStage] = useState<Stage>("intake");
@@ -108,42 +106,22 @@ function AppBody() {
 
   const [savedId, setSavedId] = useState<string | null>(null);
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
 
-  const listFn = useServerFn(listChecks);
   const saveFn = useServerFn(saveCheck);
-  const deleteFn = useServerFn(deleteCheck);
   const profileFn = useServerFn(getProfile);
 
-  const historyQuery = useQuery({ queryKey: ["checks"], queryFn: () => listFn({}) });
   const profileQuery = useQuery({ queryKey: ["profile"], queryFn: () => profileFn({}) });
-  const history: HistoryEntry[] = historyQuery.data ?? [];
 
   const saveMutation = useMutation({
     mutationFn: (vars: Parameters<typeof saveFn>[0]["data"]) => saveFn({ data: vars }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["checks"] }),
   });
-  const removeMutation = useMutation({
-    mutationFn: (id: string) => deleteFn({ data: { id } }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["checks"] }),
-  });
-
-  async function handleSignOut() {
-    await queryClient.cancelQueries();
-    queryClient.clear();
-    await supabase.auth.signOut();
-    navigate({ to: "/auth", replace: true });
-  }
-
-  useEffect(() => {
-    const p = profileQuery.data;
-    if (!p) return;
-    if (p.age) setAge((prev) => prev || p.age!);
-    if (p.sex) setSex((prev) => prev || p.sex!);
-  }, [profileQuery.data]);
 
   const askFn = useServerFn(getFollowUpQuestions);
   const assessFn = useServerFn(assessSymptoms);
+
+  const age = profileQuery.data?.age ?? "";
+  const sex = profileQuery.data?.sex ?? "";
 
   const baseInput = () => ({
     symptoms: symptoms.trim(),
@@ -152,6 +130,8 @@ function AppBody() {
     duration: duration.trim() || undefined,
     language: lang,
   });
+
+
 
   const questionsMutation = useMutation({
     mutationFn: () => askFn({ data: baseInput() }),
