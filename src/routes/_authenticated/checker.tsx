@@ -221,8 +221,10 @@ function AppBody() {
 
   return (
     <main className="min-h-screen bg-background">
+      <ProfileMenu />
       <div className="mx-auto max-w-3xl px-5 py-10 sm:py-16">
-        <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
+        <header className="mb-8 flex flex-wrap items-start justify-between gap-4 pr-14">
+
           <div className="flex items-center gap-3">
             <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
               <Stethoscope className="size-5" />
