@@ -252,23 +252,10 @@ function AppBody() {
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-3">
-            {profileQuery.data?.name ? (
-              <span className="text-sm text-muted-foreground">{profileQuery.data.name}</span>
-            ) : null}
-            <Button variant="ghost" size="sm" onClick={handleSignOut}>
-              <LogOut className="mr-2 size-4" /> Sign out
-            </Button>
-          </div>
         </header>
 
-        <Tabs defaultValue="check">
-          <TabsList className="mb-6">
-            <TabsTrigger value="check">{t.tabCheck}</TabsTrigger>
-            <TabsTrigger value="history">{t.tabHistory}</TabsTrigger>
-          </TabsList>
+        <div className="space-y-6">
 
-          <TabsContent value="check" className="space-y-6">
             {stage === "intake" && (
               <Card className="border-border/70 shadow-soft">
                 <CardHeader>
