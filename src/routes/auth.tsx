@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
+
+
 
 
 export const Route = createFileRoute("/auth")({
@@ -47,9 +48,6 @@ function AuthPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [otpStage, setOtpStage] = useState(false);
-  const [code, setCode] = useState("");
-  const [cooldown, setCooldown] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -65,11 +63,6 @@ function AuthPage() {
     };
   }, [navigate]);
 
-  useEffect(() => {
-    if (cooldown <= 0) return;
-    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
-    return () => clearTimeout(t);
-  }, [cooldown]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
