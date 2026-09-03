@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
+
 
 export const Route = createFileRoute("/auth")({
   head: () => ({
@@ -32,6 +34,8 @@ export const Route = createFileRoute("/auth")({
 
 type Mode = "signin" | "signup";
 
+const RESEND_COOLDOWN = 45;
+
 function AuthPage() {
   const navigate = useNavigate();
   const [mode, setMode] = useState<Mode>("signin");
@@ -43,6 +47,9 @@ function AuthPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [otpStage, setOtpStage] = useState(false);
+  const [code, setCode] = useState("");
+  const [cooldown, setCooldown] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -57,6 +64,12 @@ function AuthPage() {
       sub.subscription.unsubscribe();
     };
   }, [navigate]);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -75,7 +88,10 @@ function AuthPage() {
         });
         if (err) throw err;
         if (!data.session) {
-          setNotice("Check your email to confirm your account, then sign in.");
+          setOtpStage(true);
+          setCode("");
+          setCooldown(RESEND_COOLDOWN);
+          setNotice(null);
         }
       } else {
         const { error: err } = await supabase.auth.signInWithPassword({
@@ -90,6 +106,146 @@ function AuthPage() {
       setBusy(false);
     }
   }
+
+  async function verify(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setNotice(null);
+    setBusy(true);
+    try {
+      const { error: err } = await supabase.auth.verifyOtp({
+        email: email.trim(),
+        token: code.trim(),
+        type: "email",
+      });
+      if (err) throw err;
+      // onAuthStateChange redirects to /checker
+    } catch {
+      setError("That code is incorrect or expired. Please try again or resend the code.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resend() {
+    if (cooldown > 0) return;
+    setError(null);
+    setNotice(null);
+    setBusy(true);
+    try {
+      const { error: err } = await supabase.auth.resend({
+        type: "signup",
+        email: email.trim(),
+        options: { emailRedirectTo: window.location.origin },
+      });
+      if (err) throw err;
+      setNotice("A new code is on its way.");
+      setCooldown(RESEND_COOLDOWN);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not resend the code");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (otpStage) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-background px-5 py-12">
+        <div className="w-full max-w-md space-y-6">
+          <div className="flex items-center gap-3">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
+              <Stethoscope className="size-5" />
+            </span>
+            <div>
+              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                SymptomScope
+              </p>
+              <h1 className="font-display text-2xl leading-tight">Verify your email</h1>
+            </div>
+          </div>
+
+          <Card className="border-border/70 shadow-soft">
+            <CardHeader>
+              <CardTitle className="font-display text-xl font-normal">
+                Enter verification code
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form className="space-y-5" onSubmit={verify}>
+                <p className="text-sm text-muted-foreground">
+                  We've sent a 6-digit code to{" "}
+                  <span className="font-medium text-foreground">{email.trim()}</span>. Enter it
+                  below to verify your account.
+                </p>
+
+                <div className="flex justify-center">
+                  <InputOTP maxLength={6} value={code} onChange={setCode}>
+                    <InputOTPGroup>
+                      {[0, 1, 2, 3, 4, 5].map((i) => (
+                        <InputOTPSlot key={i} index={i} />
+                      ))}
+                    </InputOTPGroup>
+                  </InputOTP>
+                </div>
+
+                {error && (
+                  <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                    {error}
+                  </p>
+                )}
+                {notice && (
+                  <p className="rounded-lg bg-secondary px-3 py-2 text-sm text-secondary-foreground">
+                    {notice}
+                  </p>
+                )}
+
+                <Button
+                  type="submit"
+                  size="lg"
+                  className="w-full"
+                  disabled={busy || code.length < 6}
+                >
+                  {busy && <Loader2 className="mr-2 size-4 animate-spin" />}
+                  Verify and continue
+                </Button>
+
+                <div className="flex items-center justify-between text-sm">
+                  <button
+                    type="button"
+                    className="text-muted-foreground underline-offset-4 hover:underline"
+                    onClick={() => {
+                      setOtpStage(false);
+                      setMode("signup");
+                      setCode("");
+                      setError(null);
+                      setNotice(null);
+                    }}
+                  >
+                    Edit email
+                  </button>
+                  <button
+                    type="button"
+                    disabled={cooldown > 0 || busy}
+                    className="text-muted-foreground underline-offset-4 hover:underline disabled:opacity-60 disabled:hover:no-underline"
+                    onClick={resend}
+                  >
+                    {cooldown > 0 ? `Resend code in ${cooldown}s` : "Resend code"}
+                  </button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+
+          <p className="text-center text-xs text-muted-foreground">
+            <Link to="/" className="underline-offset-4 hover:underline">
+              Back to home
+            </Link>
+          </p>
+        </div>
+      </main>
+    );
+  }
+
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-background px-5 py-12">
