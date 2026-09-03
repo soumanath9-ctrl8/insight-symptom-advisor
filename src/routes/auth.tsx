@@ -35,7 +35,7 @@ export const Route = createFileRoute("/auth")({
 
 type Mode = "signin" | "signup";
 
-const RESEND_COOLDOWN = 45;
+
 
 function AuthPage() {
   const navigate = useNavigate();
