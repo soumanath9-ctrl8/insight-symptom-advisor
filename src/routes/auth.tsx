@@ -81,13 +81,13 @@ function AuthPage() {
         });
         if (err) throw err;
         if (!data.session) {
-          // Account created but no session returned — sign in directly.
-          const { error: signInErr } = await supabase.auth.signInWithPassword({
-            email: email.trim(),
-            password,
-          });
-          if (signInErr) throw signInErr;
+          setMode("signin");
+          setPassword("");
+          setNotice(
+            "Check your email to confirm your account, then sign in.",
+          );
         }
+
       } else {
         const { error: err } = await supabase.auth.signInWithPassword({
           email: email.trim(),
