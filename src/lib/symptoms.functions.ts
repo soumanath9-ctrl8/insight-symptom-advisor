@@ -141,6 +141,15 @@ export const getFollowUpQuestions = createServerFn({ method: "POST" })
 export const assessSymptoms = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => AssessmentInput.parse(input))
   .handler(async ({ data }) => {
+    // Deterministic safety pass BEFORE the AI reasoning.
+    const redFlagCheck = detectRedFlags({
+      symptoms: data.symptoms,
+      answers: data.answers,
+      age: data.age,
+      duration: data.duration,
+      language: data.language,
+    });
+
     const raw = AssessmentSchema.parse(
       await callModel(
         [
@@ -151,6 +160,9 @@ export const assessSymptoms = createServerFn({ method: "POST" })
           "3. Common conditions must dominate the ranking unless the specific combination genuinely points elsewhere. Likelihoods are integers 0-100 and need not sum to 100; keep serious conditions low (typically under 15) when only weak, non-specific evidence exists.",
           "4. riskLevel is 'high' only when the combination is genuinely dangerous or time-critical; 'moderate' when review is sensible; otherwise 'low'.",
           "5. urgency is 'emergency' or 'urgent' only for genuinely emergency-level combinations or clear red flags. Otherwise use 'self-care' or 'see-a-doctor'.",
+          redFlagCheck.level
+            ? `SAFETY OVERRIDE: a deterministic red-flag screen already classified this presentation as ${redFlagCheck.level}. You MUST treat it at least that seriously (critical => "emergency"), explain why plainly, and give emergency-oriented next steps. Detected: ${redFlagCheck.hits.map((h) => h.id).join(", ")}.`
+            : "",
           "TONE: for low and moderate results be warm, calm and reassuring, explicitly noting what makes serious causes unlikely. Reserve urgent, directive language for true emergencies. Never claim a diagnosis.",
           "riskRationale: one or two sentences naming the specific COMBINATION of factors (symptoms + duration + context) that produced this risk level, and stating plainly that no single symptom drove it.",
           "contributingFactors: 2-5 items, weight 0-100 for how much that factor moved this score, effect = 'increases' | 'decreases' | 'neutral'.",
@@ -162,12 +174,18 @@ export const assessSymptoms = createServerFn({ method: "POST" })
           '"riskRationale": string, "matchingSymptoms": string[], "contributingFactors":[{"factor": string, "weight": number, "effect": string}],',
           '"nextSteps": string, "selfCare": string[], "reliefCategories": string[]}],',
           '"redFlags": string[], "generalAdvice": string}',
-        ].join(" "),
+        ]
+          .filter(Boolean)
+          .join(" "),
         [
           contextBlock(data),
           data.answers.length
             ? "History answers:\n" +
               data.answers.map((a) => `Q: ${a.question}\nA: ${a.answer}`).join("\n")
+            : "",
+          redFlagCheck.hits.length
+            ? "Deterministic red flags detected:\n" +
+              redFlagCheck.hits.map((h) => `- [${h.severity}] ${h.message}`).join("\n")
             : "",
         ]
           .filter(Boolean)
@@ -175,16 +193,39 @@ export const assessSymptoms = createServerFn({ method: "POST" })
       ),
     );
 
+    let urgency = normalizeUrgency(raw.urgency);
+    let urgencyReason = raw.urgencyReason;
+    let redFlags = raw.redFlags;
+
+    // The AI can never downgrade a deterministic red flag.
+    if (redFlagCheck.level) {
+      const floor: Urgency = redFlagCheck.level === "critical" ? "emergency" : "urgent";
+      const order: Urgency[] = ["self-care", "see-a-doctor", "urgent", "emergency"];
+      if (order.indexOf(urgency) < order.indexOf(floor)) urgency = floor;
+      const notice = redFlagUrgencyNotice(redFlagCheck.level, data.language);
+      urgencyReason = `${notice} ${urgencyReason}`.trim();
+      const detected = redFlagCheck.hits.map((h) => h.message);
+      redFlags = [...detected, ...redFlags.filter((f) => !detected.includes(f))];
+    }
+
+    const emergency = urgency === "emergency" || urgency === "urgent";
+
     return {
       ...raw,
-      urgency: normalizeUrgency(raw.urgency),
+      urgency,
+      urgencyReason,
+      redFlags,
       conditions: raw.conditions.map((c) => {
-        const riskLevel = normalizeRisk(c.riskLevel);
+        const riskLevel =
+          redFlagCheck.level === "critical" && c === raw.conditions[0]
+            ? "high"
+            : normalizeRisk(c.riskLevel);
         return {
           ...c,
           riskLevel,
-          ...(riskLevel === "high" ? { selfCare: [], reliefCategories: [] } : {}),
+          ...(riskLevel === "high" || emergency ? { selfCare: [], reliefCategories: [] } : {}),
         };
       }),
     } satisfies Assessment;
   });
+
