@@ -224,10 +224,10 @@ const HIGH_RISK_AGE_TRIGGERS = [
  */
 export function detectRedFlags(input: {
   symptoms: string;
-  answers?: { question: string; answer: string }[];
-  age?: string;
-  duration?: string;
-  language?: "en" | "bn";
+  answers?: { question: string; answer: string }[] | undefined;
+  age?: string | undefined;
+  duration?: string | undefined;
+  language?: "en" | "bn" | undefined;
 }): RedFlagResult {
   const lang = input.language === "bn" ? "bn" : "en";
   const text = [
