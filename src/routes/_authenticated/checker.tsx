@@ -164,6 +164,21 @@ function AppBody() {
       result.conditions.some((c) => c.riskLevel === "high")
     : false;
 
+  // Emergency results are always recorded in the patient's history.
+  useEffect(() => {
+    if (!result || !isEmergency || savedId !== null) return;
+    const top = topRisk(result);
+    saveMutation.mutate({
+      symptoms: symptoms.trim(),
+      severity: top.likelihood,
+      urgency: result.urgency,
+      topCondition: top.name,
+      summary: result.summary,
+    });
+    setSavedId("saved");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result, isEmergency, savedId]);
+
   const answeredPairs = useMemo(
     () =>
       questions
@@ -171,6 +186,7 @@ function AppBody() {
         .filter((a) => a.answer.length > 0),
     [questions, answers],
   );
+
 
   function submitAnswer(value: string) {
     const next = [...answers];
