@@ -2,6 +2,9 @@ import { createServerFn } from "@tanstack/react-start";
 import { streamText } from "ai";
 import { z } from "zod";
 
+import { detectRedFlags, redFlagUrgencyNotice } from "./red-flags";
+
+
 const ContextInput = z.object({
   symptoms: z.string().min(3).max(2000),
   age: z.string().max(10).optional(),
