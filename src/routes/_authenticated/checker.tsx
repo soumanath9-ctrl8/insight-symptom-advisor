@@ -420,7 +420,7 @@ function AppBody() {
                         <button
                           key={opt}
                           type="button"
-                          disabled={assessMutation.isPending}
+                          disabled={busy}
                           onClick={() => submitAnswer(opt)}
                           className="rounded-full border border-border bg-secondary px-3 py-1.5 text-sm text-secondary-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
                         >
@@ -439,12 +439,13 @@ function AppBody() {
 
                   <div className="flex flex-wrap gap-2">
                     <Button
-                      disabled={draft.trim().length === 0 || assessMutation.isPending}
+                      disabled={draft.trim().length === 0 || busy}
                       onClick={() => submitAnswer(draft.trim())}
                     >
-                      {assessMutation.isPending ? (
+                      {busy ? (
                         <>
-                          <Loader2 className="mr-2 size-4 animate-spin" /> {t.analyzing}
+                          <Loader2 className="mr-2 size-4 animate-spin" />{" "}
+                          {clarifyMutation.isPending ? t.checkingAnswers : t.analyzing}
                         </>
                       ) : step + 1 < questions.length ? (
                         t.next
@@ -456,7 +457,7 @@ function AppBody() {
                     </Button>
                     <Button
                       variant="ghost"
-                      disabled={assessMutation.isPending}
+                      disabled={busy}
                       onClick={() => submitAnswer("")}
                     >
                       {t.skip}
