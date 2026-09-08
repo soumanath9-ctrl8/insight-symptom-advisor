@@ -123,6 +123,7 @@ function AppBody() {
 
   const askFn = useServerFn(getFollowUpQuestions);
   const assessFn = useServerFn(assessSymptoms);
+  const clarifyFn = useServerFn(clarifyAnswers);
 
   const age = profileQuery.data?.age ?? "";
   const sex = profileQuery.data?.sex ?? "";
