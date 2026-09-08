@@ -275,6 +275,7 @@ export const assessSymptoms = createServerFn({ method: "POST" })
       urgency,
       urgencyReason,
       redFlags,
+      confidence: normalizeConfidence(raw.confidence),
       conditions: raw.conditions.map((c) => {
         const riskLevel =
           redFlagCheck.level === "critical" && c === raw.conditions[0]
