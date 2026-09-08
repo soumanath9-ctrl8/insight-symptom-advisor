@@ -370,7 +370,7 @@ function AppBody() {
                     size="lg"
                     className="w-full"
                     disabled={symptoms.trim().length < 3 || questionsMutation.isPending}
-                    onClick={() => questionsMutation.mutate()}
+                    onClick={startCheck}
                   >
                     {questionsMutation.isPending ? (
                       <>
