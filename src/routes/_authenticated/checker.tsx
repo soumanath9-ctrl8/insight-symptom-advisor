@@ -488,6 +488,21 @@ function AppBody() {
                     </Badge>
                     <p className="font-display text-xl leading-snug">{result.summary}</p>
                     <p className="text-sm text-muted-foreground">{result.urgencyReason}</p>
+                    <p className="text-xs text-muted-foreground">
+                      <span className="uppercase tracking-[0.14em]">{t.confidenceLabel}:</span>{" "}
+                      {t.confidence[result.confidence]}
+                      {result.confidenceNote ? ` — ${result.confidenceNote}` : ""}
+                    </p>
+                    {result.missingInfo.length > 0 && (
+                      <div className="rounded-lg bg-secondary px-3 py-2 text-xs text-secondary-foreground">
+                        <p className="mb-1 font-medium">{t.missingInfoTitle}</p>
+                        <ul className="list-disc space-y-0.5 pl-4">
+                          {result.missingInfo.map((m) => (
+                            <li key={m}>{m}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                     <div className="flex flex-wrap gap-2 pt-1">
                       <Button
                         variant="outline"
