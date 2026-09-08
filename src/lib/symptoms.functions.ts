@@ -290,3 +290,41 @@ export const assessSymptoms = createServerFn({ method: "POST" })
     } satisfies Assessment;
   });
 
+const ClarifySchema = z.object({
+  conflict: z.boolean().default(false),
+  question: z.string().default(""),
+  why: z.string().default(""),
+  options: z.array(z.string()).default([]),
+});
+
+/**
+ * Checks the collected answers for contradictions or a missing detail that
+ * would otherwise have to be guessed. Returns one clarifying question, or null
+ * when the history is internally consistent.
+ */
+export const clarifyAnswers = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) => AssessmentInput.parse(input))
+  .handler(async ({ data }): Promise<FollowUpQuestion | null> => {
+    if (!data.answers.length) return null;
+    const raw = await callModel(
+      [
+        "You are a clinician reviewing the history you just took, before making any assessment.",
+        "Decide whether the patient's answers CONTRADICT each other or contradict their original description (e.g. 'no fever' but 'temperature 39', 'pain started today' but 'three weeks of pain', 'cannot breathe at all' but 'no breathing trouble'), or whether one single detail is missing that you would otherwise have to guess.",
+        "If so, set conflict true and give exactly ONE short, polite clarifying question that resolves it, quoting both sides of the contradiction plainly. Offer 2-4 short answer options where sensible.",
+        "Never guess or assume the answer yourself. If the history is consistent and workable, set conflict false and leave question empty.",
+        langLine(data.language),
+        "Reply with ONLY JSON (no markdown fences):",
+        '{"conflict": boolean, "question": string, "why": string, "options": string[]}',
+      ].join(" "),
+      [
+        contextBlock(data),
+        "History answers:\n" +
+          data.answers.map((a) => `Q: ${a.question}\nA: ${a.answer}`).join("\n"),
+      ].join("\n\n"),
+    );
+    const parsed = ClarifySchema.parse(raw);
+    if (!parsed.conflict || parsed.question.trim().length < 5) return null;
+    return { question: parsed.question, why: parsed.why, options: parsed.options };
+  });
+
+
