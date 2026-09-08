@@ -59,20 +59,70 @@ const AssessmentSchema = z.object({
   conditions: z.array(ConditionSchema),
   redFlags: z.array(z.string()).default([]),
   generalAdvice: z.string(),
+  confidence: z.string().default("moderate"),
+  confidenceNote: z.string().default(""),
+  missingInfo: z.array(z.string()).default([]),
 });
 
 type RawAssessment = z.infer<typeof AssessmentSchema>;
 
 export type RiskLevel = "low" | "moderate" | "high";
+export type Confidence = "low" | "moderate" | "high";
 export type Urgency = "self-care" | "see-a-doctor" | "urgent" | "emergency";
 export type FollowUpQuestion = z.infer<typeof QuestionsSchema>["questions"][number];
 export type Condition = Omit<RawAssessment["conditions"][number], "riskLevel"> & {
   riskLevel: RiskLevel;
 };
-export type Assessment = Omit<RawAssessment, "urgency" | "conditions"> & {
+export type Assessment = Omit<RawAssessment, "urgency" | "conditions" | "confidence"> & {
   urgency: Urgency;
+  confidence: Confidence;
   conditions: Condition[];
 };
+
+function normalizeConfidence(value: string): Confidence {
+  const v = value.toLowerCase();
+  if (v.includes("high") || v.includes("উচ্চ")) return "high";
+  if (v.includes("low") || v.includes("কম")) return "low";
+  return "moderate";
+}
+
+/**
+ * Deterministic, AI-free emergency result. Used to short-circuit the flow the
+ * moment a life-threatening warning sign appears, so the emergency screen
+ * (112 / 108 + nearby hospitals) is shown before any normal prediction.
+ */
+export function immediateEmergencyAssessment(input: {
+  symptoms: string;
+  answers?: { question: string; answer: string }[] | undefined;
+  age?: string | undefined;
+  duration?: string | undefined;
+  language?: "en" | "bn" | undefined;
+}): Assessment | null {
+  const check = detectRedFlags(input);
+  if (check.level !== "critical") return null;
+  const lang = input.language === "bn" ? "bn" : "en";
+  const notice = redFlagUrgencyNotice("critical", lang);
+  return {
+    summary:
+      lang === "bn"
+        ? "আপনার বর্ণনায় সম্ভাব্য জীবনসংশয়ী সতর্ক-সংকেত পাওয়া গেছে। কোনো সম্ভাব্য রোগের অনুমান না করে সরাসরি আপৎকালীন পরামর্শ দেখানো হচ্ছে।"
+        : "Your description contains possible life-threatening warning signs, so emergency guidance is shown straight away instead of a condition prediction.",
+    urgency: "emergency",
+    urgencyReason: notice,
+    conditions: [],
+    redFlags: check.hits.map((h) => h.message),
+    generalAdvice:
+      lang === "bn"
+        ? "এখনই ১১২ বা ১০৮-এ কল করুন, অথবা নিচের নিকটতম হাসপাতাল/ক্লিনিক দেখে সঙ্গে সঙ্গে রওনা দিন। রোগীকে একা রাখবেন না এবং নিজে থেকে কোনো ঔষধ দেবেন না।"
+        : "Call 112 or 108 now, or head to one of the nearest hospitals or clinics listed below. Do not leave the person alone and do not give any medicine on your own.",
+    confidence: "high",
+    confidenceNote:
+      lang === "bn"
+        ? "এটি নিয়মভিত্তিক সুরক্ষা যাচাই — এআই অনুমান নয়।"
+        : "This comes from a rule-based safety check, not an AI guess.",
+    missingInfo: [],
+  };
+}
 
 function normalizeRisk(value: string): RiskLevel {
   const v = value.toLowerCase();
@@ -129,7 +179,13 @@ export const getFollowUpQuestions = createServerFn({ method: "POST" })
       [
         "You are a careful clinician taking a patient history before any assessment.",
         "Ask 2-4 short, specific follow-up questions that would most change your thinking about THIS presentation.",
-        "Each question must be clearly derived from the symptoms already reported (character, timing, associated features, red-flag screening, exposures, relevant history or medication).",
+        "Every question MUST target the problem actually reported. Worked examples:",
+        "- chest pain => character (pressure/tightness vs sharp), whether it spreads to the arm, jaw or back, sweating or nausea, breathlessness, whether exertion brings it on;",
+        "- breathing difficulty => how severe (at rest, on walking, talking in full sentences), fever, cough or sputum, wheeze, whether it is getting worse and how fast;",
+        "- headache => speed of onset, worst-ever intensity, neck stiffness, vision changes, fever;",
+        "- abdominal pain => exact site, movement of the pain, vomiting, bowel or urinary change, tenderness;",
+        "- fever => measured temperature, rash, urinary symptoms, travel or mosquito exposure, hydration and urine output.",
+        "Ask about age, sex, existing conditions, current medicines or allergies ONLY when that detail would genuinely change the assessment of THIS complaint (e.g. medicines for chest pain, pregnancy for abdominal pain, allergies before suggesting relief options). Never ask for them routinely, and never ask for details already provided in the context above.",
         "Never ask generic filler questions, never repeat information already given, never suggest a diagnosis, never alarm the patient.",
         "One question per item, plain language, answerable in a sentence. Where sensible, offer 2-4 short answer options.",
         langLine(data.language),
@@ -170,13 +226,14 @@ export const assessSymptoms = createServerFn({ method: "POST" })
           "riskRationale: one or two sentences naming the specific COMBINATION of factors (symptoms + duration + context) that produced this risk level, and stating plainly that no single symptom drove it.",
           "contributingFactors: 2-5 items, weight 0-100 for how much that factor moved this score, effect = 'increases' | 'decreases' | 'neutral'.",
           "CARE GUIDANCE: for low/moderate riskLevel give general self-care measures (rest, fluids, monitoring) and reliefCategories as CATEGORIES ONLY, e.g. 'a fever reducer such as paracetamol, taken as per package instructions'. Never give a prescription, never give doses, schedules, or prescription-only drugs. For high riskLevel leave selfCare and reliefCategories as empty arrays and put emergency-oriented wording in nextSteps.",
+          "HONESTY ABOUT GAPS: never invent, assume or fill in details the patient did not give (no invented temperatures, durations, exposures or history). List each important detail that is still missing in missingInfo, in the patient's own plain language. Set confidence to 'low' when key details are missing, answers were skipped or the picture is vague, 'moderate' when the history is partial, 'high' only when the reported combination is clear. confidenceNote: one short sentence saying why, and what would sharpen it. When confidence is low, say so plainly in summary rather than guessing.",
           langLine(data.language),
           "Reply with ONLY JSON (no markdown fences) of this exact shape:",
           '{"summary": string, "urgency": "self-care"|"see-a-doctor"|"urgent"|"emergency", "urgencyReason": string,',
           '"conditions":[{"name": string, "riskLevel": "low"|"moderate"|"high", "likelihood": number, "explanation": string,',
           '"riskRationale": string, "matchingSymptoms": string[], "contributingFactors":[{"factor": string, "weight": number, "effect": string}],',
           '"nextSteps": string, "selfCare": string[], "reliefCategories": string[]}],',
-          '"redFlags": string[], "generalAdvice": string}',
+          '"redFlags": string[], "generalAdvice": string, "confidence": "low"|"moderate"|"high", "confidenceNote": string, "missingInfo": string[]}',
         ]
           .filter(Boolean)
           .join(" "),
@@ -218,6 +275,7 @@ export const assessSymptoms = createServerFn({ method: "POST" })
       urgency,
       urgencyReason,
       redFlags,
+      confidence: normalizeConfidence(raw.confidence),
       conditions: raw.conditions.map((c) => {
         const riskLevel =
           redFlagCheck.level === "critical" && c === raw.conditions[0]
@@ -231,4 +289,42 @@ export const assessSymptoms = createServerFn({ method: "POST" })
       }),
     } satisfies Assessment;
   });
+
+const ClarifySchema = z.object({
+  conflict: z.boolean().default(false),
+  question: z.string().default(""),
+  why: z.string().default(""),
+  options: z.array(z.string()).default([]),
+});
+
+/**
+ * Checks the collected answers for contradictions or a missing detail that
+ * would otherwise have to be guessed. Returns one clarifying question, or null
+ * when the history is internally consistent.
+ */
+export const clarifyAnswers = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) => AssessmentInput.parse(input))
+  .handler(async ({ data }): Promise<FollowUpQuestion | null> => {
+    if (!data.answers.length) return null;
+    const raw = await callModel(
+      [
+        "You are a clinician reviewing the history you just took, before making any assessment.",
+        "Decide whether the patient's answers CONTRADICT each other or contradict their original description (e.g. 'no fever' but 'temperature 39', 'pain started today' but 'three weeks of pain', 'cannot breathe at all' but 'no breathing trouble'), or whether one single detail is missing that you would otherwise have to guess.",
+        "If so, set conflict true and give exactly ONE short, polite clarifying question that resolves it, quoting both sides of the contradiction plainly. Offer 2-4 short answer options where sensible.",
+        "Never guess or assume the answer yourself. If the history is consistent and workable, set conflict false and leave question empty.",
+        langLine(data.language),
+        "Reply with ONLY JSON (no markdown fences):",
+        '{"conflict": boolean, "question": string, "why": string, "options": string[]}',
+      ].join(" "),
+      [
+        contextBlock(data),
+        "History answers:\n" +
+          data.answers.map((a) => `Q: ${a.question}\nA: ${a.answer}`).join("\n"),
+      ].join("\n\n"),
+    );
+    const parsed = ClarifySchema.parse(raw);
+    if (!parsed.conflict || parsed.question.trim().length < 5) return null;
+    return { question: parsed.question, why: parsed.why, options: parsed.options };
+  });
+
 

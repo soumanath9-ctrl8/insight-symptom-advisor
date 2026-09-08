@@ -16,7 +16,9 @@ import {
 
 import {
   assessSymptoms,
+  clarifyAnswers,
   getFollowUpQuestions,
+  immediateEmergencyAssessment,
   type Assessment,
   type Condition,
   type FollowUpQuestion,
@@ -104,6 +106,8 @@ function AppBody() {
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState("");
 
+  const [override, setOverride] = useState<Assessment | null>(null);
+  const [clarified, setClarified] = useState(false);
   const [savedId, setSavedId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
@@ -119,6 +123,7 @@ function AppBody() {
 
   const askFn = useServerFn(getFollowUpQuestions);
   const assessFn = useServerFn(assessSymptoms);
+  const clarifyFn = useServerFn(clarifyAnswers);
 
   const age = profileQuery.data?.age ?? "";
   const sex = profileQuery.data?.sex ?? "";
@@ -132,6 +137,21 @@ function AppBody() {
   });
 
 
+
+  /**
+   * Safety first: the deterministic warning-sign check runs before any
+   * questions or prediction. A critical hit jumps straight to the emergency
+   * result (112 / 108 + nearby hospitals).
+   */
+  function startCheck() {
+    const emergency = immediateEmergencyAssessment(baseInput());
+    if (emergency) {
+      setOverride(emergency);
+      setStage("result");
+      return;
+    }
+    questionsMutation.mutate();
+  }
 
   const questionsMutation = useMutation({
     mutationFn: () => askFn({ data: baseInput() }),
@@ -157,7 +177,19 @@ function AppBody() {
     onSuccess: () => setStage("result"),
   });
 
-  const result: Assessment | undefined = assessMutation.data;
+  const clarifyMutation = useMutation({
+    mutationFn: (finalAnswers: string[]) =>
+      clarifyFn({
+        data: {
+          ...baseInput(),
+          answers: questions
+            .map((q, i) => ({ question: q.question, answer: finalAnswers[i]?.trim() ?? "" }))
+            .filter((a) => a.answer.length > 0),
+        },
+      }),
+  });
+
+  const result: Assessment | undefined = override ?? assessMutation.data;
   const isEmergency = result
     ? result.urgency === "emergency" ||
       result.urgency === "urgent" ||
@@ -193,11 +225,47 @@ function AppBody() {
     next[step] = value;
     setAnswers(next);
     setDraft("");
+
+    const pairs = questions
+      .map((q, i) => ({ question: q.question, answer: next[i]?.trim() ?? "" }))
+      .filter((a) => a.answer.length > 0);
+
+    // Warning signs mentioned in an answer escalate immediately, before any prediction.
+    const emergency = immediateEmergencyAssessment({ ...baseInput(), answers: pairs });
+    if (emergency) {
+      setOverride(emergency);
+      setStage("result");
+      return;
+    }
+
     if (step + 1 < questions.length) {
       setStep(step + 1);
-    } else {
-      assessMutation.mutate(next);
+      return;
     }
+
+    // One clarifying question when the answers contradict each other or a key
+    // detail is missing — better than guessing.
+    if (!clarified) {
+      clarifyMutation.mutate(next, {
+        onSuccess: (extra) => {
+          setClarified(true);
+          if (extra) {
+            setQuestions([...questions, extra]);
+            setAnswers([...next, ""]);
+            setStep(questions.length);
+          } else {
+            assessMutation.mutate(next);
+          }
+        },
+        onError: () => {
+          setClarified(true);
+          assessMutation.mutate(next);
+        },
+      });
+      return;
+    }
+
+    assessMutation.mutate(next);
   }
 
   function reset() {
@@ -207,10 +275,14 @@ function AppBody() {
     setStep(0);
     setDraft("");
     setSavedId(null);
+    setOverride(null);
+    setClarified(false);
     assessMutation.reset();
     questionsMutation.reset();
+    clarifyMutation.reset();
   }
 
+  const busy = assessMutation.isPending || clarifyMutation.isPending;
   const error = (questionsMutation.error ?? assessMutation.error) as Error | null;
 
   return (
@@ -298,7 +370,7 @@ function AppBody() {
                     size="lg"
                     className="w-full"
                     disabled={symptoms.trim().length < 3 || questionsMutation.isPending}
-                    onClick={() => questionsMutation.mutate()}
+                    onClick={startCheck}
                   >
                     {questionsMutation.isPending ? (
                       <>
@@ -348,7 +420,7 @@ function AppBody() {
                         <button
                           key={opt}
                           type="button"
-                          disabled={assessMutation.isPending}
+                          disabled={busy}
                           onClick={() => submitAnswer(opt)}
                           className="rounded-full border border-border bg-secondary px-3 py-1.5 text-sm text-secondary-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
                         >
@@ -367,12 +439,13 @@ function AppBody() {
 
                   <div className="flex flex-wrap gap-2">
                     <Button
-                      disabled={draft.trim().length === 0 || assessMutation.isPending}
+                      disabled={draft.trim().length === 0 || busy}
                       onClick={() => submitAnswer(draft.trim())}
                     >
-                      {assessMutation.isPending ? (
+                      {busy ? (
                         <>
-                          <Loader2 className="mr-2 size-4 animate-spin" /> {t.analyzing}
+                          <Loader2 className="mr-2 size-4 animate-spin" />{" "}
+                          {clarifyMutation.isPending ? t.checkingAnswers : t.analyzing}
                         </>
                       ) : step + 1 < questions.length ? (
                         t.next
@@ -384,7 +457,7 @@ function AppBody() {
                     </Button>
                     <Button
                       variant="ghost"
-                      disabled={assessMutation.isPending}
+                      disabled={busy}
                       onClick={() => submitAnswer("")}
                     >
                       {t.skip}
@@ -415,6 +488,21 @@ function AppBody() {
                     </Badge>
                     <p className="font-display text-xl leading-snug">{result.summary}</p>
                     <p className="text-sm text-muted-foreground">{result.urgencyReason}</p>
+                    <p className="text-xs text-muted-foreground">
+                      <span className="uppercase tracking-[0.14em]">{t.confidenceLabel}:</span>{" "}
+                      {t.confidence[result.confidence]}
+                      {result.confidenceNote ? ` — ${result.confidenceNote}` : ""}
+                    </p>
+                    {result.missingInfo.length > 0 && (
+                      <div className="rounded-lg bg-secondary px-3 py-2 text-xs text-secondary-foreground">
+                        <p className="mb-1 font-medium">{t.missingInfoTitle}</p>
+                        <ul className="list-disc space-y-0.5 pl-4">
+                          {result.missingInfo.map((m) => (
+                            <li key={m}>{m}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                     <div className="flex flex-wrap gap-2 pt-1">
                       <Button
                         variant="outline"
