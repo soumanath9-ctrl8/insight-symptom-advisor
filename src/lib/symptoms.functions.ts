@@ -59,20 +59,70 @@ const AssessmentSchema = z.object({
   conditions: z.array(ConditionSchema),
   redFlags: z.array(z.string()).default([]),
   generalAdvice: z.string(),
+  confidence: z.string().default("moderate"),
+  confidenceNote: z.string().default(""),
+  missingInfo: z.array(z.string()).default([]),
 });
 
 type RawAssessment = z.infer<typeof AssessmentSchema>;
 
 export type RiskLevel = "low" | "moderate" | "high";
+export type Confidence = "low" | "moderate" | "high";
 export type Urgency = "self-care" | "see-a-doctor" | "urgent" | "emergency";
 export type FollowUpQuestion = z.infer<typeof QuestionsSchema>["questions"][number];
 export type Condition = Omit<RawAssessment["conditions"][number], "riskLevel"> & {
   riskLevel: RiskLevel;
 };
-export type Assessment = Omit<RawAssessment, "urgency" | "conditions"> & {
+export type Assessment = Omit<RawAssessment, "urgency" | "conditions" | "confidence"> & {
   urgency: Urgency;
+  confidence: Confidence;
   conditions: Condition[];
 };
+
+function normalizeConfidence(value: string): Confidence {
+  const v = value.toLowerCase();
+  if (v.includes("high") || v.includes("উচ্চ")) return "high";
+  if (v.includes("low") || v.includes("কম")) return "low";
+  return "moderate";
+}
+
+/**
+ * Deterministic, AI-free emergency result. Used to short-circuit the flow the
+ * moment a life-threatening warning sign appears, so the emergency screen
+ * (112 / 108 + nearby hospitals) is shown before any normal prediction.
+ */
+export function immediateEmergencyAssessment(input: {
+  symptoms: string;
+  answers?: { question: string; answer: string }[] | undefined;
+  age?: string | undefined;
+  duration?: string | undefined;
+  language?: "en" | "bn" | undefined;
+}): Assessment | null {
+  const check = detectRedFlags(input);
+  if (check.level !== "critical") return null;
+  const lang = input.language === "bn" ? "bn" : "en";
+  const notice = redFlagUrgencyNotice("critical", lang);
+  return {
+    summary:
+      lang === "bn"
+        ? "আপনার বর্ণনায় সম্ভাব্য জীবনসংশয়ী সতর্ক-সংকেত পাওয়া গেছে। কোনো সম্ভাব্য রোগের অনুমান না করে সরাসরি আপৎকালীন পরামর্শ দেখানো হচ্ছে।"
+        : "Your description contains possible life-threatening warning signs, so emergency guidance is shown straight away instead of a condition prediction.",
+    urgency: "emergency",
+    urgencyReason: notice,
+    conditions: [],
+    redFlags: check.hits.map((h) => h.message),
+    generalAdvice:
+      lang === "bn"
+        ? "এখনই ১১২ বা ১০৮-এ কল করুন, অথবা নিচের নিকটতম হাসপাতাল/ক্লিনিক দেখে সঙ্গে সঙ্গে রওনা দিন। রোগীকে একা রাখবেন না এবং নিজে থেকে কোনো ঔষধ দেবেন না।"
+        : "Call 112 or 108 now, or head to one of the nearest hospitals or clinics listed below. Do not leave the person alone and do not give any medicine on your own.",
+    confidence: "high",
+    confidenceNote:
+      lang === "bn"
+        ? "এটি নিয়মভিত্তিক সুরক্ষা যাচাই — এআই অনুমান নয়।"
+        : "This comes from a rule-based safety check, not an AI guess.",
+    missingInfo: [],
+  };
+}
 
 function normalizeRisk(value: string): RiskLevel {
   const v = value.toLowerCase();
