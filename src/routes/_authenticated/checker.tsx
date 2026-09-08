@@ -225,11 +225,47 @@ function AppBody() {
     next[step] = value;
     setAnswers(next);
     setDraft("");
+
+    const pairs = questions
+      .map((q, i) => ({ question: q.question, answer: next[i]?.trim() ?? "" }))
+      .filter((a) => a.answer.length > 0);
+
+    // Warning signs mentioned in an answer escalate immediately, before any prediction.
+    const emergency = immediateEmergencyAssessment({ ...baseInput(), answers: pairs });
+    if (emergency) {
+      setOverride(emergency);
+      setStage("result");
+      return;
+    }
+
     if (step + 1 < questions.length) {
       setStep(step + 1);
-    } else {
-      assessMutation.mutate(next);
+      return;
     }
+
+    // One clarifying question when the answers contradict each other or a key
+    // detail is missing — better than guessing.
+    if (!clarified) {
+      clarifyMutation.mutate(next, {
+        onSuccess: (extra) => {
+          setClarified(true);
+          if (extra) {
+            setQuestions([...questions, extra]);
+            setAnswers([...next, ""]);
+            setStep(questions.length);
+          } else {
+            assessMutation.mutate(next);
+          }
+        },
+        onError: () => {
+          setClarified(true);
+          assessMutation.mutate(next);
+        },
+      });
+      return;
+    }
+
+    assessMutation.mutate(next);
   }
 
   function reset() {
@@ -239,10 +275,14 @@ function AppBody() {
     setStep(0);
     setDraft("");
     setSavedId(null);
+    setOverride(null);
+    setClarified(false);
     assessMutation.reset();
     questionsMutation.reset();
+    clarifyMutation.reset();
   }
 
+  const busy = assessMutation.isPending || clarifyMutation.isPending;
   const error = (questionsMutation.error ?? assessMutation.error) as Error | null;
 
   return (
