@@ -75,6 +75,10 @@ export const STRINGS = {
     reportSymptoms: "Reported symptoms",
     reportAnswers: "History questions",
     print: "Print / Save as PDF",
+    confidenceLabel: "Confidence",
+    confidence: { low: "Low confidence", moderate: "Moderate confidence", high: "Good confidence" },
+    missingInfoTitle: "Details that would sharpen this",
+    checkingAnswers: "Checking your answers…",
   },
   bn: {
     brand: "সিম্পটমস্কোপ",
