@@ -233,7 +233,7 @@ export const assessSymptoms = createServerFn({ method: "POST" })
           '"conditions":[{"name": string, "riskLevel": "low"|"moderate"|"high", "likelihood": number, "explanation": string,',
           '"riskRationale": string, "matchingSymptoms": string[], "contributingFactors":[{"factor": string, "weight": number, "effect": string}],',
           '"nextSteps": string, "selfCare": string[], "reliefCategories": string[]}],',
-          '"redFlags": string[], "generalAdvice": string}',
+          '"redFlags": string[], "generalAdvice": string, "confidence": "low"|"moderate"|"high", "confidenceNote": string, "missingInfo": string[]}',
         ]
           .filter(Boolean)
           .join(" "),
