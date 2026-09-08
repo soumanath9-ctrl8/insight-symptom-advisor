@@ -138,6 +138,21 @@ function AppBody() {
 
 
 
+  /**
+   * Safety first: the deterministic warning-sign check runs before any
+   * questions or prediction. A critical hit jumps straight to the emergency
+   * result (112 / 108 + nearby hospitals).
+   */
+  function startCheck() {
+    const emergency = immediateEmergencyAssessment(baseInput());
+    if (emergency) {
+      setOverride(emergency);
+      setStage("result");
+      return;
+    }
+    questionsMutation.mutate();
+  }
+
   const questionsMutation = useMutation({
     mutationFn: () => askFn({ data: baseInput() }),
     onSuccess: (qs) => {
