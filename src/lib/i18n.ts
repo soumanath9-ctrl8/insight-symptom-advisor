@@ -151,6 +151,10 @@ export const STRINGS = {
     reportSymptoms: "উল্লেখিত উপসর্গ",
     reportAnswers: "ইতিহাসের প্রশ্ন",
     print: "প্রিন্ট / PDF সেভ",
+    confidenceLabel: "নিশ্চয়তা",
+    confidence: { low: "কম নিশ্চয়তা", moderate: "মধ্যম নিশ্চয়তা", high: "ভালো নিশ্চয়তা" },
+    missingInfoTitle: "যেসব তথ্য থাকলে আরও নিখুঁত হতো",
+    checkingAnswers: "আপনার উত্তর যাচাই করা হচ্ছে…",
   },
 } as const;
 
