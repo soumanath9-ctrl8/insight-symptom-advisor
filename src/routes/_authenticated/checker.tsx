@@ -106,6 +106,8 @@ function AppBody() {
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState("");
 
+  const [override, setOverride] = useState<Assessment | null>(null);
+  const [clarified, setClarified] = useState(false);
   const [savedId, setSavedId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
