@@ -16,7 +16,9 @@ import {
 
 import {
   assessSymptoms,
+  clarifyAnswers,
   getFollowUpQuestions,
+  immediateEmergencyAssessment,
   type Assessment,
   type Condition,
   type FollowUpQuestion,
