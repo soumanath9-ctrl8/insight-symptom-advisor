@@ -177,7 +177,19 @@ function AppBody() {
     onSuccess: () => setStage("result"),
   });
 
-  const result: Assessment | undefined = assessMutation.data;
+  const clarifyMutation = useMutation({
+    mutationFn: (finalAnswers: string[]) =>
+      clarifyFn({
+        data: {
+          ...baseInput(),
+          answers: questions
+            .map((q, i) => ({ question: q.question, answer: finalAnswers[i]?.trim() ?? "" }))
+            .filter((a) => a.answer.length > 0),
+        },
+      }),
+  });
+
+  const result: Assessment | undefined = override ?? assessMutation.data;
   const isEmergency = result
     ? result.urgency === "emergency" ||
       result.urgency === "urgent" ||
