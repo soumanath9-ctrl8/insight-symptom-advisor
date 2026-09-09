@@ -273,25 +273,41 @@ export const assessSymptoms = createServerFn({ method: "POST" })
     }
 
     const emergency = urgency === "emergency" || urgency === "urgent";
+    const confidence = normalizeConfidence(raw.confidence);
+
+    // Match strengths are symptom-fit scores, not validated probabilities, so
+    // they are damped whenever the history is incomplete: a thin picture can
+    // never produce a near-certain-looking number.
+    const cap = confidence === "high" ? 92 : confidence === "moderate" ? 78 : 60;
+    const answeredCount = data.answers.filter((a) => a.answer.trim().length > 0).length;
+    const gapPenalty = Math.min(20, raw.missingInfo.length * 5 + (answeredCount < 2 ? 8 : 0));
 
     return {
       ...raw,
       urgency,
       urgencyReason,
       redFlags,
-      confidence: normalizeConfidence(raw.confidence),
-      conditions: raw.conditions.map((c) => {
-        const riskLevel =
-          redFlagCheck.level === "critical" && c === raw.conditions[0]
-            ? "high"
-            : normalizeRisk(c.riskLevel);
-        return {
-          ...c,
-          riskLevel,
-          ...(riskLevel === "high" || emergency ? { selfCare: [], reliefCategories: [] } : {}),
-        };
-      }),
+      confidence,
+      conditions: raw.conditions
+        .map((c) => {
+          const riskLevel =
+            redFlagCheck.level === "critical" && c === raw.conditions[0]
+              ? "high"
+              : normalizeRisk(c.riskLevel);
+          const likelihood = Math.max(
+            1,
+            Math.round(Math.min(cap, Math.max(0, c.likelihood)) * (1 - gapPenalty / 100)),
+          );
+          return {
+            ...c,
+            riskLevel,
+            likelihood,
+            ...(riskLevel === "high" || emergency ? { selfCare: [], reliefCategories: [] } : {}),
+          };
+        })
+        .sort((a, b) => b.likelihood - a.likelihood),
     } satisfies Assessment;
+
   });
 
 const ClarifySchema = z.object({
