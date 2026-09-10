@@ -1,7 +1,5 @@
-import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-import { requireSupabaseServerConfig } from "@/lib/supabase-env.server";
 import { supabase } from "@/integrations/supabase/client";
 
 const SexSchema = z.enum(["Male", "Female"]);
@@ -16,56 +14,108 @@ const ExistingConditionSchema = z.enum([
   "Emergency",
 ]);
 
-const PatientSchema = z.object({
-  name: z.string().trim().min(1, "Name is required.").max(100),
-  age: z.string().trim().max(10).default(""),
-  sex: SexSchema,
-  allergies: YesNoSchema,
-  existingConditions: ExistingConditionSchema,
-  currentMedications: z.string().trim().max(2000).default(""),
-  previousMajorIllnesses: YesNoSchema,
-  previousMajorIllnessDetails: z
-    .string()
-    .trim()
-    .max(2000)
-    .default(""),
-  smokingStatus: YesNoSchema,
-  familyHistory: z.string().trim().max(2000).default(""),
-  pregnancyStatus: z.string().trim().max(100).default(""),
-});
+const PatientSchema = z
+  .object({
+    name: z.string().trim().min(1, "Name is required.").max(100),
+
+    age: z.string().trim().max(10).default(""),
+
+    sex: SexSchema,
+
+    allergies: YesNoSchema,
+
+    existingConditions: ExistingConditionSchema,
+
+    currentMedications: z.string().trim().max(2000).default(""),
+
+    previousMajorIllnesses: YesNoSchema,
+
+    previousMajorIllnessDetails: z
+      .string()
+      .trim()
+      .max(2000)
+      .default(""),
+
+    smokingStatus: YesNoSchema,
+
+    familyHistory: z.string().trim().max(2000).default(""),
+
+    pregnancyStatus: z.string().trim().max(100).default(""),
+  })
+  .superRefine((value, ctx) => {
+    if (
+      value.previousMajorIllnesses === "Yes" &&
+      !value.previousMajorIllnessDetails.trim()
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["previousMajorIllnessDetails"],
+        message: "Please enter the previous major illness.",
+      });
+    }
+
+    if (value.sex === "Male" && value.pregnancyStatus.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["pregnancyStatus"],
+        message: "Pregnancy status is only applicable to female patients.",
+      });
+    }
+  });
 
 export type PatientInput = z.infer<typeof PatientSchema>;
 
 function toRow(input: PatientInput, userId: string) {
   return {
     user_id: userId,
-    name: input.name,
-    age: input.age || null,
+    name: input.name.trim(),
+    age: input.age.trim() || null,
     sex: input.sex,
     allergies: input.allergies,
     existing_conditions: input.existingConditions,
-    current_medications: input.currentMedications || null,
+    current_medications:
+      input.currentMedications.trim() || null,
+
     previous_major_illnesses:
       input.previousMajorIllnesses === "Yes"
-        ? input.previousMajorIllnessDetails || null
+        ? input.previousMajorIllnessDetails.trim() || null
         : null,
+
     smoking_status: input.smokingStatus,
-    family_history: input.familyHistory || null,
+
+    family_history:
+      input.familyHistory.trim() || null,
+
     pregnancy_status:
       input.sex === "Female"
-        ? input.pregnancyStatus || null
+        ? input.pregnancyStatus.trim() || null
         : null,
   };
 }
 
-export const listPatients = createServerFn({
-  method: "GET",
-}).handler(async ({ context }) => {
-  requireSupabaseServerConfig();
+async function requireUser() {
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
 
-  if (!context?.userId) {
+  if (error) {
+    throw new Error(`Unable to verify your session: ${error.message}`);
+  }
+
+  if (!user) {
     throw new Error("You must be signed in.");
   }
+
+  return user;
+}
+
+/**
+ * Load all patient profiles belonging to the currently
+ * authenticated user.
+ */
+export async function listPatients() {
+  const user = await requireUser();
 
   const { data, error } = await supabase
     .from("patient_profiles")
@@ -86,144 +136,168 @@ export const listPatients = createServerFn({
         "updated_at",
       ].join(","),
     )
-    .eq("user_id", context.userId)
-    .order("created_at", { ascending: false });
+    .eq("user_id", user.id)
+    .order("created_at", {
+      ascending: false,
+    });
 
   if (error) {
-    throw new Error(`Unable to load patient profiles: ${error.message}`);
+    throw new Error(
+      `Unable to load patient profiles: ${error.message}`,
+    );
   }
 
   return data ?? [];
-});
+}
 
-export const getPatient = createServerFn({
-  method: "GET",
-})
-  .inputValidator(
-    z.object({
-      patientId: z.string().uuid(),
-    }),
-  )
-  .handler(async ({ data, context }) => {
-    requireSupabaseServerConfig();
+/**
+ * Load one patient belonging to the currently authenticated user.
+ */
+export async function getPatient(patientId: string) {
+  const user = await requireUser();
 
-    if (!context?.userId) {
-      throw new Error("You must be signed in.");
-    }
+  const parsedId = z.string().uuid().safeParse(patientId);
 
-    const { data: patient, error } = await supabase
-      .from("patient_profiles")
-      .select("*")
-      .eq("id", data.patientId)
-      .eq("user_id", context.userId)
-      .maybeSingle();
+  if (!parsedId.success) {
+    throw new Error("Invalid patient profile.");
+  }
 
-    if (error) {
-      throw new Error(`Unable to load patient: ${error.message}`);
-    }
+  const { data, error } = await supabase
+    .from("patient_profiles")
+    .select("*")
+    .eq("id", parsedId.data)
+    .eq("user_id", user.id)
+    .maybeSingle();
 
-    if (!patient) {
-      throw new Error("Patient profile was not found.");
-    }
+  if (error) {
+    throw new Error(
+      `Unable to load patient: ${error.message}`,
+    );
+  }
 
-    return patient;
-  });
+  if (!data) {
+    throw new Error("Patient profile was not found.");
+  }
 
-export const createPatient = createServerFn({
-  method: "POST",
-})
-  .inputValidator(PatientSchema)
-  .handler(async ({ data, context }) => {
-    requireSupabaseServerConfig();
+  return data;
+}
 
-    if (!context?.userId) {
-      throw new Error("You must be signed in.");
-    }
+/**
+ * Create a new separate patient profile.
+ */
+export async function createPatient(input: PatientInput) {
+  const user = await requireUser();
 
-    const payload = toRow(data, context.userId);
+  const parsed = PatientSchema.safeParse(input);
 
-    const { data: patient, error } = await supabase
-      .from("patient_profiles")
-      .insert(payload)
-      .select("*")
-      .single();
+  if (!parsed.success) {
+    throw new Error(
+      parsed.error.issues[0]?.message ??
+        "Please check the patient information.",
+    );
+  }
 
-    if (error) {
-      throw new Error(`Unable to create patient: ${error.message}`);
-    }
+  const payload = toRow(parsed.data, user.id);
 
-    return {
-      success: true,
-      patient,
-    };
-  });
+  const { data: patient, error } = await supabase
+    .from("patient_profiles")
+    .insert(payload)
+    .select("*")
+    .single();
 
-export const updatePatient = createServerFn({
-  method: "POST",
-})
-  .inputValidator(
-    PatientSchema.extend({
-      patientId: z.string().uuid(),
-    }),
-  )
-  .handler(async ({ data, context }) => {
-    requireSupabaseServerConfig();
+  if (error) {
+    throw new Error(
+      `Unable to create patient: ${error.message}`,
+    );
+  }
 
-    if (!context?.userId) {
-      throw new Error("You must be signed in.");
-    }
+  return {
+    success: true,
+    patient,
+  };
+}
 
-    const { patientId, ...profile } = data;
+/**
+ * Update an existing patient belonging to the current user.
+ */
+export async function updatePatient(
+  input: PatientInput & {
+    patientId: string;
+  },
+) {
+  const user = await requireUser();
 
-    const payload = {
-      ...toRow(profile, context.userId),
-      updated_at: new Date().toISOString(),
-    };
+  const idResult = z
+    .string()
+    .uuid()
+    .safeParse(input.patientId);
 
-    const { data: patient, error } = await supabase
-      .from("patient_profiles")
-      .update(payload)
-      .eq("id", patientId)
-      .eq("user_id", context.userId)
-      .select("*")
-      .single();
+  if (!idResult.success) {
+    throw new Error("Invalid patient profile.");
+  }
 
-    if (error) {
-      throw new Error(`Unable to update patient: ${error.message}`);
-    }
+  const parsed = PatientSchema.safeParse(input);
 
-    return {
-      success: true,
-      patient,
-    };
-  });
+  if (!parsed.success) {
+    throw new Error(
+      parsed.error.issues[0]?.message ??
+        "Please check the patient information.",
+    );
+  }
 
-export const deletePatient = createServerFn({
-  method: "POST",
-})
-  .inputValidator(
-    z.object({
-      patientId: z.string().uuid(),
-    }),
-  )
-  .handler(async ({ data, context }) => {
-    requireSupabaseServerConfig();
+  const payload = {
+    ...toRow(parsed.data, user.id),
+    updated_at: new Date().toISOString(),
+  };
 
-    if (!context?.userId) {
-      throw new Error("You must be signed in.");
-    }
+  const { data: patient, error } = await supabase
+    .from("patient_profiles")
+    .update(payload)
+    .eq("id", idResult.data)
+    .eq("user_id", user.id)
+    .select("*")
+    .single();
 
-    const { error } = await supabase
-      .from("patient_profiles")
-      .delete()
-      .eq("id", data.patientId)
-      .eq("user_id", context.userId);
+  if (error) {
+    throw new Error(
+      `Unable to update patient: ${error.message}`,
+    );
+  }
 
-    if (error) {
-      throw new Error(`Unable to delete patient: ${error.message}`);
-    }
+  return {
+    success: true,
+    patient,
+  };
+}
 
-    return {
-      success: true,
-    };
-  });
+/**
+ * Delete a patient belonging to the current user.
+ */
+export async function deletePatient(patientId: string) {
+  const user = await requireUser();
+
+  const idResult = z
+    .string()
+    .uuid()
+    .safeParse(patientId);
+
+  if (!idResult.success) {
+    throw new Error("Invalid patient profile.");
+  }
+
+  const { error } = await supabase
+    .from("patient_profiles")
+    .delete()
+    .eq("id", idResult.data)
+    .eq("user_id", user.id);
+
+  if (error) {
+    throw new Error(
+      `Unable to delete patient: ${error.message}`,
+    );
+  }
+
+  return {
+    success: true,
+  };
+}
