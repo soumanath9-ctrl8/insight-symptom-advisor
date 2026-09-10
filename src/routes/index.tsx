@@ -124,7 +124,7 @@ function Landing() {
       if (active && data.session) navigate({ to: "/home", replace: true });
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-      if (session) navigate({ to: "/checker", replace: true });
+      if (session) navigate({ to: "/home", replace: true });
     });
     return () => {
       active = false;
