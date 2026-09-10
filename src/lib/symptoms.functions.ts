@@ -72,6 +72,7 @@ const AssessmentSchema = z.object({
   confidence: z.string().default("moderate"),
   confidenceNote: z.string().default(""),
   missingInfo: z.array(z.string()).default([]),
+  nextStep: z.string().default(""),
 });
 
 type RawAssessment = z.infer<typeof AssessmentSchema>;
