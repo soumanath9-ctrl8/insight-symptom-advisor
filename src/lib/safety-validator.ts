@@ -53,17 +53,28 @@ type Validatable = {
 
 export type ValidationIssue = { label: string; where: string };
 
-/** Removes banned phrasing from a free-text field. */
-function scrubText(value: string, issues: ValidationIssue[], where: string): string {
-  let out = value;
-  for (const { pattern, label } of BANNED_PATTERNS) {
-    const global = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : pattern.flags + "g");
-    if (global.test(out)) {
-      issues.push({ label, where });
-      out = out.replace(global, "").replace(/\s{2,}/g, " ").replace(/\s+([.,;:])/g, "$1").trim();
+/**
+ * Removes unsafe content from a free-text field. Whole sentences are dropped
+ * rather than single phrases, so nothing mangled or half-true survives. When
+ * everything is dropped, the caller's safe fallback is used instead.
+ */
+function scrubText(
+  value: string,
+  issues: ValidationIssue[],
+  where: string,
+  fallback = "",
+): string {
+  const sentences = value.split(/(?<=[.!?।])\s+/).filter((s) => s.trim().length > 0);
+  const kept = sentences.filter((sentence) => {
+    const bad = BANNED_PATTERNS.find(({ pattern }) => pattern.test(sentence));
+    if (bad) {
+      issues.push({ label: bad.label, where });
+      return false;
     }
-  }
-  return out;
+    return true;
+  });
+  const out = kept.join(" ").replace(/\s{2,}/g, " ").trim();
+  return out.length > 0 ? out : fallback;
 }
 
 /** Drops any care-guidance item that names a drug, dose or schedule. */
