@@ -125,19 +125,29 @@ export function validateAssessment(input: {
 
   const emergency = a.urgency === "emergency" || a.urgency === "urgent";
 
-  // 3. Text scrubbing across every user-visible field.
-  a.summary = scrubText(a.summary, issues, "summary");
-  a.urgencyReason = scrubText(a.urgencyReason, issues, "urgencyReason");
-  a.generalAdvice = scrubText(a.generalAdvice, issues, "generalAdvice");
+  // 3. Text scrubbing across every user-visible field. Anything removed is
+  //    replaced by safe, non-diagnostic wording rather than left blank.
+  const safeGeneric =
+    lang === "bn"
+      ? "আপনার জানানো উপসর্গগুলি একাধিক কারণের সঙ্গে মিলতে পারে; নিশ্চিত হতে চিকিৎসকের মূল্যায়ন দরকার।"
+      : "Your reported symptoms may be consistent with more than one explanation; a medical review is needed to be sure.";
+  const safeAction =
+    lang === "bn"
+      ? "একজন চিকিৎসক বা ফার্মাসিস্টের সঙ্গে কথা বলুন; উপসর্গ খারাপ হলে দ্রুত চিকিৎসা নিন।"
+      : "Speak with a doctor or pharmacist, and seek care promptly if anything worsens.";
+
+  a.summary = scrubText(a.summary, issues, "summary", safeGeneric);
+  a.urgencyReason = scrubText(a.urgencyReason, issues, "urgencyReason", safeGeneric);
+  a.generalAdvice = scrubText(a.generalAdvice, issues, "generalAdvice", safeAction);
   a.confidenceNote = scrubText(a.confidenceNote, issues, "confidenceNote");
-  if (a.nextStep) a.nextStep = scrubText(a.nextStep, issues, "nextStep");
+  if (a.nextStep) a.nextStep = scrubText(a.nextStep, issues, "nextStep", safeAction);
 
   a.conditions = a.conditions.map((c) => {
     const cleaned: Condition = {
       ...c,
-      explanation: scrubText(c.explanation, issues, `condition:${c.name}`),
-      riskRationale: scrubText(c.riskRationale, issues, `condition:${c.name}`),
-      nextSteps: scrubText(c.nextSteps, issues, `condition:${c.name}`),
+      explanation: scrubText(c.explanation, issues, `condition:${c.name}`, safeGeneric),
+      riskRationale: scrubText(c.riskRationale, issues, `condition:${c.name}`, safeGeneric),
+      nextSteps: scrubText(c.nextSteps, issues, `condition:${c.name}`, safeAction),
       selfCare: scrubGuidance(c.selfCare, issues, `selfCare:${c.name}`),
       reliefCategories: scrubGuidance(c.reliefCategories, issues, `relief:${c.name}`),
     };
