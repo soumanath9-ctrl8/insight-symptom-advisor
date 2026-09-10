@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { streamText } from "ai";
 import { z } from "zod";
 
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { detectRedFlags, redFlagUrgencyNotice, type RedFlagResult } from "./red-flags";
 import {
   KNOWLEDGE_PROVENANCE,
