@@ -212,3 +212,305 @@ export const Constants = {
     Enums: {},
   },
 } as const
+
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[];
+
+export type Database = {
+  public: {
+    Tables: {
+      profiles: {
+        Row: {
+          age: string | null;
+          allergies: string | null;
+          created_at: string;
+          current_medications: string | null;
+          existing_conditions: string | null;
+          family_history: string | null;
+          id: string;
+          name: string;
+          pregnancy_status: string | null;
+          previous_major_illnesses: string | null;
+          sex: string | null;
+          smoking_status: string | null;
+          updated_at: string;
+        };
+
+        Insert: {
+          age?: string | null;
+          allergies?: string | null;
+          created_at?: string;
+          current_medications?: string | null;
+          existing_conditions?: string | null;
+          family_history?: string | null;
+          id: string;
+          name?: string;
+          pregnancy_status?: string | null;
+          previous_major_illnesses?: string | null;
+          sex?: string | null;
+          smoking_status?: string | null;
+          updated_at?: string;
+        };
+
+        Update: {
+          age?: string | null;
+          allergies?: string | null;
+          created_at?: string;
+          current_medications?: string | null;
+          existing_conditions?: string | null;
+          family_history?: string | null;
+          id?: string;
+          name?: string;
+          pregnancy_status?: string | null;
+          previous_major_illnesses?: string | null;
+          sex?: string | null;
+          smoking_status?: string | null;
+          updated_at?: string;
+        };
+
+        Relationships: [];
+      };
+
+      patient_profiles: {
+        Row: {
+          age: string | null;
+          allergies: string | null;
+          created_at: string;
+          current_medications: string | null;
+          existing_conditions: string | null;
+          family_history: string | null;
+          id: string;
+          name: string;
+          owner_user_id: string;
+          pregnancy_status: string | null;
+          previous_major_illnesses: string | null;
+          sex: string | null;
+          smoking_status: string | null;
+          updated_at: string;
+        };
+
+        Insert: {
+          age?: string | null;
+          allergies?: string | null;
+          created_at?: string;
+          current_medications?: string | null;
+          existing_conditions?: string | null;
+          family_history?: string | null;
+          id?: string;
+          name?: string;
+          owner_user_id: string;
+          pregnancy_status?: string | null;
+          previous_major_illnesses?: string | null;
+          sex?: string | null;
+          smoking_status?: string | null;
+          updated_at?: string;
+        };
+
+        Update: {
+          age?: string | null;
+          allergies?: string | null;
+          created_at?: string;
+          current_medications?: string | null;
+          existing_conditions?: string | null;
+          family_history?: string | null;
+          id?: string;
+          name?: string;
+          owner_user_id?: string;
+          pregnancy_status?: string | null;
+          previous_major_illnesses?: string | null;
+          sex?: string | null;
+          smoking_status?: string | null;
+          updated_at?: string;
+        };
+
+        Relationships: [
+          {
+            foreignKeyName: "patient_profiles_owner_user_id_fkey";
+            columns: ["owner_user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+
+      symptom_checks: {
+        Row: {
+          answers: Json;
+          categories: Json;
+          created_at: string;
+          id: string;
+          next_step: string;
+          patient_id: string | null;
+          red_flag: boolean;
+          red_flags: Json;
+          severity: number;
+          subject_type: string;
+          summary: string;
+          supporting_factors: Json;
+          symptoms: string;
+          top_condition: string;
+          uncertainty: string;
+          urgency: string;
+          user_id: string;
+          vitals: Json;
+        };
+
+        Insert: {
+          answers?: Json;
+          categories?: Json;
+          created_at?: string;
+          id?: string;
+          next_step?: string;
+          patient_id?: string | null;
+          red_flag?: boolean;
+          red_flags?: Json;
+          severity?: number;
+          subject_type?: string;
+          summary?: string;
+          supporting_factors?: Json;
+          symptoms: string;
+          top_condition?: string;
+          uncertainty?: string;
+          urgency: string;
+          user_id: string;
+          vitals?: Json;
+        };
+
+        Update: {
+          answers?: Json;
+          categories?: Json;
+          created_at?: string;
+          id?: string;
+          next_step?: string;
+          patient_id?: string | null;
+          red_flag?: boolean;
+          red_flags?: Json;
+          severity?: number;
+          subject_type?: string;
+          summary?: string;
+          supporting_factors?: Json;
+          symptoms?: string;
+          top_condition?: string;
+          uncertainty?: string;
+          urgency?: string;
+          user_id?: string;
+          vitals?: Json;
+        };
+
+        Relationships: [
+          {
+            foreignKeyName: "symptom_checks_patient_id_fkey";
+            columns: ["patient_id"];
+            isOneToOne: false;
+            referencedRelation: "patient_profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+    };
+
+    Views: Record<string, never>;
+
+    Functions: Record<string, never>;
+
+    Enums: Record<string, never>;
+
+    CompositeTypes: Record<string, never>;
+  };
+};
+
+export type Tables<
+  PublicTableNameOrOptions extends
+    | keyof Database["public"]["Tables"]
+    | {
+        schema: keyof Database;
+        table: keyof Database[PublicTableNameOrOptions["schema"]]["Tables"];
+      },
+  TableName extends PublicTableNameOrOptions extends {
+    schema: keyof Database;
+    table: keyof Database[PublicTableNameOrOptions["schema"]]["Tables"];
+  }
+    ? PublicTableNameOrOptions["table"]
+    : never = never,
+> = PublicTableNameOrOptions extends {
+  schema: keyof Database;
+  table: keyof Database[PublicTableNameOrOptions["schema"]]["Tables"];
+}
+  ? Database[PublicTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+      Row: infer R;
+    }
+    ? R
+    : never
+  : PublicTableNameOrOptions extends keyof Database["public"]["Tables"]
+    ? Database["public"]["Tables"][PublicTableNameOrOptions] extends {
+        Row: infer R;
+      }
+      ? R
+      : never
+    : never;
+
+export type TablesInsert<
+  PublicTableNameOrOptions extends
+    | keyof Database["public"]["Tables"]
+    | {
+        schema: keyof Database;
+        table: keyof Database[PublicTableNameOrOptions["schema"]]["Tables"];
+      },
+  TableName extends PublicTableNameOrOptions extends {
+    schema: keyof Database;
+    table: keyof Database[PublicTableNameOrOptions["schema"]]["Tables"];
+  }
+    ? PublicTableNameOrOptions["table"]
+    : never = never,
+> = PublicTableNameOrOptions extends {
+  schema: keyof Database;
+  table: keyof Database[PublicTableNameOrOptions["schema"]]["Tables"];
+}
+  ? Database[PublicTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+      Insert: infer I;
+    }
+    ? I
+    : never
+  : PublicTableNameOrOptions extends keyof Database["public"]["Tables"]
+    ? Database["public"]["Tables"][PublicTableNameOrOptions] extends {
+        Insert: infer I;
+      }
+      ? I
+      : never
+    : never;
+
+export type TablesUpdate<
+  PublicTableNameOrOptions extends
+    | keyof Database["public"]["Tables"]
+    | {
+        schema: keyof Database;
+        table: keyof Database[PublicTableNameOrOptions["schema"]]["Tables"];
+      },
+  TableName extends PublicTableNameOrOptions extends {
+    schema: keyof Database;
+    table: keyof Database[PublicTableNameOrOptions["schema"]]["Tables"];
+  }
+    ? PublicTableNameOrOptions["table"]
+    : never = never,
+> = PublicTableNameOrOptions extends {
+  schema: keyof Database;
+  table: keyof Database[PublicTableNameOrOptions["schema"]]["Tables"];
+}
+  ? Database[PublicTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+      Update: infer U;
+    }
+    ? U
+    : never
+  : PublicTableNameOrOptions extends keyof Database["public"]["Tables"]
+    ? Database["public"]["Tables"][PublicTableNameOrOptions] extends {
+        Update: infer U;
+      }
+      ? U
+      : never
+    : never;
