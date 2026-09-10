@@ -25,6 +25,7 @@ import {
 } from "@/lib/symptoms.functions";
 import { LangContext, useLang, type Lang } from "@/lib/i18n";
 import { topRisk } from "@/lib/history";
+import { extractVitals } from "@/lib/vitals";
 import { getProfile, saveCheck } from "@/lib/history.functions";
 import { openReport } from "@/lib/report";
 import { EmergencyHelp } from "@/components/EmergencyHelp";
@@ -136,6 +137,31 @@ function AppBody() {
     language: lang,
   });
 
+  /** Structured triage record stored with each saved check (no UI impact). */
+  function buildRecord(assessment: Assessment) {
+    const top = topRisk(assessment);
+    const pairs = questions
+      .map((q, i) => ({ question: q.question, answer: answers[i]?.trim() ?? "" }))
+      .filter((a) => a.answer.length > 0);
+    const vitals = extractVitals(
+      [symptoms, duration, ...pairs.map((p) => p.answer)].join("\n"),
+    ) as Record<string, number>;
+    return {
+      symptoms: symptoms.trim(),
+      severity: top.likelihood,
+      urgency: assessment.urgency,
+      topCondition: top.name,
+      summary: assessment.summary,
+      answers: pairs,
+      redFlag: assessment.redFlags.length > 0,
+      redFlags: assessment.redFlags,
+      categories: assessment.conditions.map((c) => c.name),
+      supportingFactors: assessment.conditions[0]?.contributingFactors ?? [],
+      vitals,
+      uncertainty: `${assessment.confidence}${assessment.confidenceNote ? ` — ${assessment.confidenceNote}` : ""}`,
+      nextStep: assessment.nextStep ?? "",
+    };
+  }
 
 
   /**
@@ -199,14 +225,7 @@ function AppBody() {
   // Emergency results are always recorded in the patient's history.
   useEffect(() => {
     if (!result || !isEmergency || savedId !== null) return;
-    const top = topRisk(result);
-    saveMutation.mutate({
-      symptoms: symptoms.trim(),
-      severity: top.likelihood,
-      urgency: result.urgency,
-      topCondition: top.name,
-      summary: result.summary,
-    });
+    saveMutation.mutate(buildRecord(result));
     setSavedId("saved");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result, isEmergency, savedId]);
@@ -525,14 +544,7 @@ function AppBody() {
                         size="sm"
                         disabled={savedId !== null}
                         onClick={() => {
-                          const top = topRisk(result);
-                          saveMutation.mutate({
-                            symptoms: symptoms.trim(),
-                            severity: top.likelihood,
-                            urgency: result.urgency,
-                            topCondition: top.name,
-                            summary: result.summary,
-                          });
+                          saveMutation.mutate(buildRecord(result));
                           setSavedId("saved");
                         }}
                       >

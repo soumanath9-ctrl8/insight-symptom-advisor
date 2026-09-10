@@ -46,6 +46,15 @@ export const saveCheck = createServerFn({ method: "POST" })
       urgency: string;
       topCondition: string;
       summary: string;
+      /** Structured triage record — stored alongside the existing fields. */
+      answers?: { question: string; answer: string }[];
+      redFlag?: boolean;
+      redFlags?: string[];
+      categories?: string[];
+      supportingFactors?: { factor: string; weight: number; effect: string }[];
+      vitals?: Record<string, number>;
+      uncertainty?: string;
+      nextStep?: string;
     }) => input,
   )
   .handler(async ({ data, context }) => {
@@ -56,6 +65,14 @@ export const saveCheck = createServerFn({ method: "POST" })
       urgency: data.urgency,
       top_condition: data.topCondition,
       summary: data.summary,
+      answers: data.answers ?? [],
+      red_flag: data.redFlag ?? false,
+      red_flags: data.redFlags ?? [],
+      categories: data.categories ?? [],
+      supporting_factors: data.supportingFactors ?? [],
+      vitals: data.vitals ?? {},
+      uncertainty: data.uncertainty ?? "",
+      next_step: data.nextStep ?? "",
     });
     if (error) throw new Error(error.message);
     return { ok: true };
