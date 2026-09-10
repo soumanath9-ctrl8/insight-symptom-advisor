@@ -136,6 +136,31 @@ function AppBody() {
     language: lang,
   });
 
+  /** Structured triage record stored with each saved check (no UI impact). */
+  function buildRecord(assessment: Assessment) {
+    const top = topRisk(assessment);
+    const pairs = questions
+      .map((q, i) => ({ question: q.question, answer: answers[i]?.trim() ?? "" }))
+      .filter((a) => a.answer.length > 0);
+    const vitals = extractVitals(
+      [symptoms, duration, ...pairs.map((p) => p.answer)].join("\n"),
+    ) as Record<string, number>;
+    return {
+      symptoms: symptoms.trim(),
+      severity: top.likelihood,
+      urgency: assessment.urgency,
+      topCondition: top.name,
+      summary: assessment.summary,
+      answers: pairs,
+      redFlag: assessment.redFlags.length > 0,
+      redFlags: assessment.redFlags,
+      categories: assessment.conditions.map((c) => c.name),
+      supportingFactors: assessment.conditions[0]?.contributingFactors ?? [],
+      vitals,
+      uncertainty: `${assessment.confidence}${assessment.confidenceNote ? ` — ${assessment.confidenceNote}` : ""}`,
+      nextStep: assessment.nextStep ?? "",
+    };
+  }
 
 
   /**
