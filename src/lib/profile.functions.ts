@@ -1,6 +1,5 @@
+import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-
-import { supabase } from "@/integrations/supabase/client";
 
 /* -------------------------------------------------------------------------- */
 /*                                   Schemas                                  */
@@ -69,8 +68,9 @@ const ProfileSchema = z
   .superRefine((value, ctx) => {
     /*
      * Previous major illness:
-     * Yes -> illness details are mandatory.
-     * No  -> details must not be required.
+     *
+     * Yes -> actual illness details required.
+     * No  -> details must remain empty.
      */
     if (
       value.previousMajorIllnesses === "Yes" &&
@@ -83,12 +83,24 @@ const ProfileSchema = z
       });
     }
 
+    if (
+      value.previousMajorIllnesses === "No" &&
+      value.previousMajorIllnessDetails.trim()
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["previousMajorIllnessDetails"],
+        message:
+          "Previous illness details should be empty when the answer is No.",
+      });
+    }
+
     /*
-     * Pregnancy status is applicable only to female users.
+     * Pregnancy information applies only to female users.
      */
     if (
       value.sex === "Male" &&
-      value.pregnancyStatus.trim().length > 0
+      value.pregnancyStatus.trim()
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -102,93 +114,49 @@ const ProfileSchema = z
 export type ProfileInput = z.infer<typeof ProfileSchema>;
 
 /* -------------------------------------------------------------------------- */
-/*                              Authentication                                */
+/*                              Server Supabase                               */
 /* -------------------------------------------------------------------------- */
 
 /**
- * Get the currently authenticated user.
+ * IMPORTANT:
+ *
+ * The browser Supabase client is NOT used in this file.
+ *
+ * This dynamically loads Lovable's generated server-only Supabase client.
+ *
+ * The service-role credential therefore remains server-side.
  */
-async function requireAuthenticatedUser() {
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
+async function getSupabaseAdmin() {
+  const module = await import(
+    "@/integrations/supabase/client.server"
+  );
 
-  if (error) {
-    throw new Error(
-      `Unable to verify your login session: ${error.message}`,
-    );
-  }
+  return module.supabaseAdmin;
+}
 
-  if (!user) {
+/* -------------------------------------------------------------------------- */
+/*                              Authentication                                */
+/* -------------------------------------------------------------------------- */
+
+function requireUserId(
+  context: { userId?: string } | undefined,
+) {
+  const userId = context?.userId;
+
+  if (!userId) {
     throw new Error(
       "You must be signed in to manage your profile.",
     );
   }
 
-  return user;
-}
-
-/* -------------------------------------------------------------------------- */
-/*                              Database Mapping                              */
-/* -------------------------------------------------------------------------- */
-
-function toProfileRow(
-  input: ProfileInput,
-) {
-  const parsed = ProfileSchema.parse(input);
-
-  return {
-    name: parsed.name.trim(),
-
-    age:
-      parsed.age.trim() || null,
-
-    sex:
-      parsed.sex,
-
-    allergies:
-      parsed.allergies,
-
-    existing_conditions:
-      parsed.existingConditions,
-
-    current_medications:
-      parsed.currentMedications.trim() || null,
-
-    /*
-     * Store the actual previous illness only when
-     * the user answered Yes.
-     */
-    previous_major_illnesses:
-      parsed.previousMajorIllnesses === "Yes"
-        ? parsed.previousMajorIllnessDetails.trim() || null
-        : null,
-
-    smoking_status:
-      parsed.smokingStatus,
-
-    family_history:
-      parsed.familyHistory.trim() || null,
-
-    /*
-     * Only female users can have pregnancy information.
-     */
-    pregnancy_status:
-      parsed.sex === "Female"
-        ? parsed.pregnancyStatus.trim() || null
-        : null,
-
-    updated_at:
-      new Date().toISOString(),
-  };
+  return userId;
 }
 
 /* -------------------------------------------------------------------------- */
 /*                              Error Handling                                */
 /* -------------------------------------------------------------------------- */
 
-function getDatabaseErrorMessage(
+function databaseError(
   error: {
     message?: string;
     code?: string;
@@ -200,10 +168,63 @@ function getDatabaseErrorMessage(
     return "An unknown database error occurred.";
   }
 
-  return (
-    error.message ||
-    "Database operation failed."
-  );
+  if (error.code === "PGRST116") {
+    return "Profile was not found.";
+  }
+
+  return error.message || "Database operation failed.";
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              Database Mapping                              */
+/* -------------------------------------------------------------------------- */
+
+function toProfileRow(
+  input: ProfileInput,
+) {
+  return {
+    name: input.name.trim(),
+
+    age:
+      input.age.trim() || null,
+
+    sex:
+      input.sex,
+
+    allergies:
+      input.allergies,
+
+    existing_conditions:
+      input.existingConditions,
+
+    current_medications:
+      input.currentMedications.trim() || null,
+
+    /*
+     * Only save the illness description when the answer is Yes.
+     */
+    previous_major_illnesses:
+      input.previousMajorIllnesses === "Yes"
+        ? input.previousMajorIllnessDetails.trim() || null
+        : null,
+
+    smoking_status:
+      input.smokingStatus,
+
+    family_history:
+      input.familyHistory.trim() || null,
+
+    /*
+     * Male users never receive pregnancy data.
+     */
+    pregnancy_status:
+      input.sex === "Female"
+        ? input.pregnancyStatus.trim() || null
+        : null,
+
+    updated_at:
+      new Date().toISOString(),
+  };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -211,122 +232,40 @@ function getDatabaseErrorMessage(
 /* -------------------------------------------------------------------------- */
 
 /**
- * Kept for compatibility with the existing UI.
+ * Kept for compatibility with the existing profile UI.
  *
- * The old implementation checked SUPABASE_URL /
- * SUPABASE_PUBLISHABLE_KEY on the server.
+ * IMPORTANT:
+ * This no longer checks SUPABASE_URL or SUPABASE_PUBLISHABLE_KEY.
  *
- * That check is no longer necessary because this application
- * is using the Lovable Cloud Supabase client configured through
- * VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.
+ * Those browser environment variables are not required for this server
+ * function because the server uses Lovable's generated client.server.ts.
  */
-export async function checkSupabaseConfig() {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+export const checkSupabaseConfig = createServerFn({
+  method: "GET",
+}).handler(async ({ context }) => {
+  const userId = context?.userId;
 
   return {
     configured: true,
-    authenticated: Boolean(user),
+    authenticated: Boolean(userId),
   };
-}
+});
 
 /* -------------------------------------------------------------------------- */
 /*                              Get Own Profile                               */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Load the logged-in user's own profile.
- *
- * IMPORTANT:
- * This function only reads the row whose id equals
- * the authenticated user's Supabase Auth user ID.
- */
-export async function getProfile() {
-  const user =
-    await requireAuthenticatedUser();
+export const getProfile = createServerFn({
+  method: "GET",
+}).handler(async ({ context }) => {
+  const userId = requireUserId(context);
 
-  const { data, error } = await supabase
-    .from("profiles")
-    .select(
-      [
-        "id",
-        "name",
-        "age",
-        "sex",
-        "allergies",
-        "existing_conditions",
-        "current_medications",
-        "previous_major_illnesses",
-        "smoking_status",
-        "family_history",
-        "pregnancy_status",
-        "created_at",
-        "updated_at",
-      ].join(","),
-    )
-    .eq("id", user.id)
-    .maybeSingle();
+  const supabaseAdmin =
+    await getSupabaseAdmin();
 
-  if (error) {
-    throw new Error(
-      `Unable to load profile: ${getDatabaseErrorMessage(
-        error,
-      )}`,
-    );
-  }
-
-  return {
-    configured: true,
-    profile: data,
-  };
-}
-
-/* -------------------------------------------------------------------------- */
-/*                              Save Own Profile                              */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Save/update the logged-in user's own profile.
- *
- * This NEVER writes to patient_profiles.
- *
- * Therefore:
- *
- * profiles
- *     = logged-in user's own profile
- *
- * patient_profiles
- *     = separate profiles for other people
- */
-export async function saveProfile(
-  input: ProfileInput,
-) {
-  const user =
-    await requireAuthenticatedUser();
-
-  const parsed =
-    ProfileSchema.safeParse(input);
-
-  if (!parsed.success) {
-    throw new Error(
-      parsed.error.issues[0]?.message ??
-        "Please check your profile information.",
-    );
-  }
-
-  const payload =
-    toProfileRow(parsed.data);
-
-  /*
-   * We update only the currently authenticated
-   * user's profile.
-   */
-  const { data: saved, error } =
-    await supabase
+  const { data, error } =
+    await supabaseAdmin
       .from("profiles")
-      .update(payload)
-      .eq("id", user.id)
       .select(
         [
           "id",
@@ -344,18 +283,122 @@ export async function saveProfile(
           "updated_at",
         ].join(","),
       )
-      .single();
+      .eq("id", userId)
+      .maybeSingle();
 
   if (error) {
     throw new Error(
-      `Unable to save profile: ${getDatabaseErrorMessage(
-        error,
-      )}`,
+      `Unable to load profile: ${databaseError(error)}`,
     );
   }
 
   return {
-    success: true,
-    profile: saved,
+    configured: true,
+    profile: data,
   };
-}
+});
+
+/* -------------------------------------------------------------------------- */
+/*                              Save Own Profile                              */
+/* -------------------------------------------------------------------------- */
+
+export const saveProfile = createServerFn({
+  method: "POST",
+})
+  .inputValidator(ProfileSchema)
+  .handler(async ({ data, context }) => {
+    const userId = requireUserId(context);
+
+    const supabaseAdmin =
+      await getSupabaseAdmin();
+
+    const payload =
+      toProfileRow(data);
+
+    /*
+     * The profile table is normally created automatically when
+     * a Supabase Auth user is created.
+     *
+     * We first attempt an update because the profile already exists
+     * in the normal application flow.
+     */
+    const { data: updated, error: updateError } =
+      await supabaseAdmin
+        .from("profiles")
+        .update(payload)
+        .eq("id", userId)
+        .select(
+          [
+            "id",
+            "name",
+            "age",
+            "sex",
+            "allergies",
+            "existing_conditions",
+            "current_medications",
+            "previous_major_illnesses",
+            "smoking_status",
+            "family_history",
+            "pregnancy_status",
+            "created_at",
+            "updated_at",
+          ].join(","),
+        )
+        .maybeSingle();
+
+    if (updateError) {
+      throw new Error(
+        `Unable to save profile: ${databaseError(updateError)}`,
+      );
+    }
+
+    /*
+     * If the row does not exist for some reason, create it.
+     *
+     * This protects the profile page from a missing profile row
+     * without requiring the user to manually create one.
+     */
+    if (!updated) {
+      const { data: inserted, error: insertError } =
+        await supabaseAdmin
+          .from("profiles")
+          .insert({
+            id: userId,
+            ...payload,
+          })
+          .select(
+            [
+              "id",
+              "name",
+              "age",
+              "sex",
+              "allergies",
+              "existing_conditions",
+              "current_medications",
+              "previous_major_illnesses",
+              "smoking_status",
+              "family_history",
+              "pregnancy_status",
+              "created_at",
+              "updated_at",
+            ].join(","),
+          )
+          .single();
+
+      if (insertError) {
+        throw new Error(
+          `Unable to create profile: ${databaseError(insertError)}`,
+        );
+      }
+
+      return {
+        success: true,
+        profile: inserted,
+      };
+    }
+
+    return {
+      success: true,
+      profile: updated,
+    };
+  });
