@@ -43,34 +43,58 @@ export type Database = {
       }
       symptom_checks: {
         Row: {
+          answers: Json
+          categories: Json
           created_at: string
           id: string
+          next_step: string
+          red_flag: boolean
+          red_flags: Json
           severity: number
           summary: string
+          supporting_factors: Json
           symptoms: string
           top_condition: string
+          uncertainty: string
           urgency: string
           user_id: string
+          vitals: Json
         }
         Insert: {
+          answers?: Json
+          categories?: Json
           created_at?: string
           id?: string
+          next_step?: string
+          red_flag?: boolean
+          red_flags?: Json
           severity?: number
           summary?: string
+          supporting_factors?: Json
           symptoms: string
           top_condition?: string
+          uncertainty?: string
           urgency: string
           user_id: string
+          vitals?: Json
         }
         Update: {
+          answers?: Json
+          categories?: Json
           created_at?: string
           id?: string
+          next_step?: string
+          red_flag?: boolean
+          red_flags?: Json
           severity?: number
           summary?: string
+          supporting_factors?: Json
           symptoms?: string
           top_condition?: string
+          uncertainty?: string
           urgency?: string
           user_id?: string
+          vitals?: Json
         }
         Relationships: []
       }
