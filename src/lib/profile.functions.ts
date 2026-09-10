@@ -2,6 +2,10 @@ import { z } from "zod";
 
 import { supabase } from "@/integrations/supabase/client";
 
+/* -------------------------------------------------------------------------- */
+/*                                   Schemas                                  */
+/* -------------------------------------------------------------------------- */
+
 const SexSchema = z.enum(["Male", "Female"]);
 
 const YesNoSchema = z.enum(["Yes", "No"]);
@@ -16,9 +20,17 @@ const ExistingConditionSchema = z.enum([
 
 const ProfileSchema = z
   .object({
-    name: z.string().trim().min(1, "Name is required.").max(100),
+    name: z
+      .string()
+      .trim()
+      .min(1, "Name is required.")
+      .max(100, "Name is too long."),
 
-    age: z.string().trim().max(10).default(""),
+    age: z
+      .string()
+      .trim()
+      .max(10, "Age is invalid.")
+      .default(""),
 
     sex: SexSchema,
 
@@ -26,23 +38,40 @@ const ProfileSchema = z
 
     existingConditions: ExistingConditionSchema,
 
-    currentMedications: z.string().trim().max(2000).default(""),
+    currentMedications: z
+      .string()
+      .trim()
+      .max(2000, "Current medications information is too long.")
+      .default(""),
 
     previousMajorIllnesses: YesNoSchema,
 
     previousMajorIllnessDetails: z
       .string()
       .trim()
-      .max(2000)
+      .max(2000, "Previous illness information is too long.")
       .default(""),
 
     smokingStatus: YesNoSchema,
 
-    familyHistory: z.string().trim().max(2000).default(""),
+    familyHistory: z
+      .string()
+      .trim()
+      .max(2000, "Family history information is too long.")
+      .default(""),
 
-    pregnancyStatus: z.string().trim().max(100).default(""),
+    pregnancyStatus: z
+      .string()
+      .trim()
+      .max(100, "Pregnancy status is invalid.")
+      .default(""),
   })
   .superRefine((value, ctx) => {
+    /*
+     * Previous major illness:
+     * Yes -> illness details are mandatory.
+     * No  -> details must not be required.
+     */
     if (
       value.previousMajorIllnesses === "Yes" &&
       !value.previousMajorIllnessDetails.trim()
@@ -54,7 +83,13 @@ const ProfileSchema = z
       });
     }
 
-    if (value.sex === "Male" && value.pregnancyStatus.trim()) {
+    /*
+     * Pregnancy status is applicable only to female users.
+     */
+    if (
+      value.sex === "Male" &&
+      value.pregnancyStatus.trim().length > 0
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["pregnancyStatus"],
@@ -66,7 +101,14 @@ const ProfileSchema = z
 
 export type ProfileInput = z.infer<typeof ProfileSchema>;
 
-async function requireUser() {
+/* -------------------------------------------------------------------------- */
+/*                              Authentication                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Get the currently authenticated user.
+ */
+async function requireAuthenticatedUser() {
   const {
     data: { user },
     error,
@@ -74,57 +116,109 @@ async function requireUser() {
 
   if (error) {
     throw new Error(
-      `Unable to verify your session: ${error.message}`,
+      `Unable to verify your login session: ${error.message}`,
     );
   }
 
   if (!user) {
-    throw new Error("You must be signed in.");
+    throw new Error(
+      "You must be signed in to manage your profile.",
+    );
   }
 
   return user;
 }
 
-function normaliseProfile(input: ProfileInput) {
+/* -------------------------------------------------------------------------- */
+/*                              Database Mapping                              */
+/* -------------------------------------------------------------------------- */
+
+function toProfileRow(
+  input: ProfileInput,
+) {
   const parsed = ProfileSchema.parse(input);
 
   return {
     name: parsed.name.trim(),
 
-    age: parsed.age.trim() || null,
+    age:
+      parsed.age.trim() || null,
 
-    sex: parsed.sex,
+    sex:
+      parsed.sex,
 
-    allergies: parsed.allergies,
+    allergies:
+      parsed.allergies,
 
-    existing_conditions: parsed.existingConditions,
+    existing_conditions:
+      parsed.existingConditions,
 
     current_medications:
       parsed.currentMedications.trim() || null,
 
+    /*
+     * Store the actual previous illness only when
+     * the user answered Yes.
+     */
     previous_major_illnesses:
       parsed.previousMajorIllnesses === "Yes"
         ? parsed.previousMajorIllnessDetails.trim() || null
         : null,
 
-    smoking_status: parsed.smokingStatus,
+    smoking_status:
+      parsed.smokingStatus,
 
     family_history:
       parsed.familyHistory.trim() || null,
 
+    /*
+     * Only female users can have pregnancy information.
+     */
     pregnancy_status:
       parsed.sex === "Female"
         ? parsed.pregnancyStatus.trim() || null
         : null,
 
-    updated_at: new Date().toISOString(),
+    updated_at:
+      new Date().toISOString(),
   };
 }
 
+/* -------------------------------------------------------------------------- */
+/*                              Error Handling                                */
+/* -------------------------------------------------------------------------- */
+
+function getDatabaseErrorMessage(
+  error: {
+    message?: string;
+    code?: string;
+    details?: string;
+    hint?: string;
+  } | null,
+) {
+  if (!error) {
+    return "An unknown database error occurred.";
+  }
+
+  return (
+    error.message ||
+    "Database operation failed."
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                           Supabase Configuration                           */
+/* -------------------------------------------------------------------------- */
+
 /**
- * Check that the authenticated Supabase session is available.
- *
  * Kept for compatibility with the existing UI.
+ *
+ * The old implementation checked SUPABASE_URL /
+ * SUPABASE_PUBLISHABLE_KEY on the server.
+ *
+ * That check is no longer necessary because this application
+ * is using the Lovable Cloud Supabase client configured through
+ * VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.
  */
 export async function checkSupabaseConfig() {
   const {
@@ -132,15 +226,25 @@ export async function checkSupabaseConfig() {
   } = await supabase.auth.getUser();
 
   return {
-    configured: Boolean(user),
+    configured: true,
+    authenticated: Boolean(user),
   };
 }
 
+/* -------------------------------------------------------------------------- */
+/*                              Get Own Profile                               */
+/* -------------------------------------------------------------------------- */
+
 /**
- * Read the currently logged-in user's own profile.
+ * Load the logged-in user's own profile.
+ *
+ * IMPORTANT:
+ * This function only reads the row whose id equals
+ * the authenticated user's Supabase Auth user ID.
  */
 export async function getProfile() {
-  const user = await requireUser();
+  const user =
+    await requireAuthenticatedUser();
 
   const { data, error } = await supabase
     .from("profiles")
@@ -166,7 +270,9 @@ export async function getProfile() {
 
   if (error) {
     throw new Error(
-      `Unable to load profile: ${error.message}`,
+      `Unable to load profile: ${getDatabaseErrorMessage(
+        error,
+      )}`,
     );
   }
 
@@ -176,13 +282,31 @@ export async function getProfile() {
   };
 }
 
-/**
- * Save the currently logged-in user's own profile.
- */
-export async function saveProfile(input: ProfileInput) {
-  const user = await requireUser();
+/* -------------------------------------------------------------------------- */
+/*                              Save Own Profile                              */
+/* -------------------------------------------------------------------------- */
 
-  const parsed = ProfileSchema.safeParse(input);
+/**
+ * Save/update the logged-in user's own profile.
+ *
+ * This NEVER writes to patient_profiles.
+ *
+ * Therefore:
+ *
+ * profiles
+ *     = logged-in user's own profile
+ *
+ * patient_profiles
+ *     = separate profiles for other people
+ */
+export async function saveProfile(
+  input: ProfileInput,
+) {
+  const user =
+    await requireAuthenticatedUser();
+
+  const parsed =
+    ProfileSchema.safeParse(input);
 
   if (!parsed.success) {
     throw new Error(
@@ -191,34 +315,42 @@ export async function saveProfile(input: ProfileInput) {
     );
   }
 
-  const payload = normaliseProfile(parsed.data);
+  const payload =
+    toProfileRow(parsed.data);
 
-  const { data: saved, error } = await supabase
-    .from("profiles")
-    .update(payload)
-    .eq("id", user.id)
-    .select(
-      [
-        "id",
-        "name",
-        "age",
-        "sex",
-        "allergies",
-        "existing_conditions",
-        "current_medications",
-        "previous_major_illnesses",
-        "smoking_status",
-        "family_history",
-        "pregnancy_status",
-        "created_at",
-        "updated_at",
-      ].join(","),
-    )
-    .single();
+  /*
+   * We update only the currently authenticated
+   * user's profile.
+   */
+  const { data: saved, error } =
+    await supabase
+      .from("profiles")
+      .update(payload)
+      .eq("id", user.id)
+      .select(
+        [
+          "id",
+          "name",
+          "age",
+          "sex",
+          "allergies",
+          "existing_conditions",
+          "current_medications",
+          "previous_major_illnesses",
+          "smoking_status",
+          "family_history",
+          "pregnancy_status",
+          "created_at",
+          "updated_at",
+        ].join(","),
+      )
+      .single();
 
   if (error) {
     throw new Error(
-      `Unable to save profile: ${error.message}`,
+      `Unable to save profile: ${getDatabaseErrorMessage(
+        error,
+      )}`,
     );
   }
 
