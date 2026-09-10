@@ -31,7 +31,8 @@ export function extractVitals(text: string): Vitals {
   // Temperature, in C or F (Bengali: তাপমাত্রা / জ্বর)
   const f = t.match(/(\d{2,3}(?:\.\d)?)\s*(?:°\s*)?f\b/);
   const c = t.match(/(\d{2,3}(?:\.\d)?)\s*(?:°\s*)?c\b/);
-  if (c) vitals.tempC = num(c);
+  const cValue = num(c);
+  if (cValue !== undefined) vitals.tempC = cValue;
   else if (f) {
     const v = num(f);
     if (v !== undefined) vitals.tempC = Math.round(((v - 32) * 5) / 9 * 10) / 10;
