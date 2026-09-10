@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 /* -------------------------------------------------------------------------- */
 /*                                   Schemas                                  */
@@ -242,8 +243,10 @@ function toProfileRow(
  */
 export const checkSupabaseConfig = createServerFn({
   method: "GET",
-}).handler(async ({ context }) => {
-  const userId = context?.userId;
+})
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+  const userId = (context as { userId?: string })?.userId;
 
   return {
     configured: true,
@@ -257,7 +260,9 @@ export const checkSupabaseConfig = createServerFn({
 
 export const getProfile = createServerFn({
   method: "GET",
-}).handler(async ({ context }) => {
+})
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
   const userId = requireUserId(context);
 
   const supabaseAdmin =
@@ -305,6 +310,7 @@ export const getProfile = createServerFn({
 export const saveProfile = createServerFn({
   method: "POST",
 })
+  .middleware([requireSupabaseAuth])
   .inputValidator(ProfileSchema)
   .handler(async ({ data, context }) => {
     const userId = requireUserId(context);
@@ -477,7 +483,9 @@ function fromUiRow(row: Record<string, unknown> | null) {
   };
 }
 
-export const getOwnProfile = createServerFn({ method: "GET" }).handler(
+export const getOwnProfile = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(
   async ({ context }) => {
     const userId = requireUserId(context);
     const supabaseAdmin = await getSupabaseAdmin();
@@ -497,6 +505,7 @@ export const getOwnProfile = createServerFn({ method: "GET" }).handler(
 );
 
 export const updateOwnProfile = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
   .inputValidator(UiProfileSchema)
   .handler(async ({ data, context }) => {
     const userId = requireUserId(context);
@@ -534,7 +543,9 @@ export const updateOwnProfile = createServerFn({ method: "POST" })
     return fromUiRow(updated as unknown as Record<string, unknown>);
   });
 
-export const listPatientProfiles = createServerFn({ method: "GET" }).handler(
+export const listPatientProfiles = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(
   async ({ context }) => {
     const userId = requireUserId(context);
     const supabaseAdmin = await getSupabaseAdmin();
@@ -565,6 +576,7 @@ export const listPatientProfiles = createServerFn({ method: "GET" }).handler(
 );
 
 export const createPatientProfile = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
   .inputValidator(UiProfileSchema)
   .handler(async ({ data, context }) => {
     const userId = requireUserId(context);
@@ -586,6 +598,7 @@ export const createPatientProfile = createServerFn({ method: "POST" })
   });
 
 export const updatePatientProfile = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
   .inputValidator(
     z.object({
       id: z.string().uuid(),
@@ -616,6 +629,7 @@ export const updatePatientProfile = createServerFn({ method: "POST" })
   });
 
 export const deletePatientProfile = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
   .inputValidator(z.object({ id: z.string().uuid() }))
   .handler(async ({ data, context }) => {
     const userId = requireUserId(context);
