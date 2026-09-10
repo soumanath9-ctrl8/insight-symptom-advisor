@@ -1,6 +1,5 @@
+import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-
-import { supabase } from "@/integrations/supabase/client";
 
 /* -------------------------------------------------------------------------- */
 /*                                   Schemas                                  */
@@ -67,10 +66,6 @@ const PatientSchema = z
       .default(""),
   })
   .superRefine((value, ctx) => {
-    /*
-     * If the user says that the patient had a previous major illness,
-     * the actual illness must be entered.
-     */
     if (
       value.previousMajorIllnesses === "Yes" &&
       !value.previousMajorIllnessDetails.trim()
@@ -82,12 +77,21 @@ const PatientSchema = z
       });
     }
 
-    /*
-     * Pregnancy status applies only to female patients.
-     */
+    if (
+      value.previousMajorIllnesses === "No" &&
+      value.previousMajorIllnessDetails.trim()
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["previousMajorIllnessDetails"],
+        message:
+          "Previous illness details should be empty when the answer is No.",
+      });
+    }
+
     if (
       value.sex === "Male" &&
-      value.pregnancyStatus.trim().length > 0
+      value.pregnancyStatus.trim()
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -99,6 +103,86 @@ const PatientSchema = z
   });
 
 export type PatientInput = z.infer<typeof PatientSchema>;
+
+/* -------------------------------------------------------------------------- */
+/*                              Database Types                                */
+/* -------------------------------------------------------------------------- */
+
+type PatientIdInput = {
+  patientId: string;
+};
+
+/* -------------------------------------------------------------------------- */
+/*                              Server Supabase                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * IMPORTANT:
+ *
+ * We intentionally import client.server dynamically inside server handlers.
+ *
+ * Do NOT import "@/integrations/supabase/client" here.
+ *
+ * client.ts is the browser client.
+ * client.server.ts is the Lovable Cloud server-side client.
+ *
+ * The generated server client uses SUPABASE_SERVICE_ROLE_KEY and therefore
+ * must never be sent to the browser.
+ */
+async function getSupabaseAdmin() {
+  const module = await import(
+    "@/integrations/supabase/client.server"
+  );
+
+  return module.supabaseAdmin;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              Authentication                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * All server functions use context.userId supplied by the application's
+ * authenticated server context.
+ *
+ * Even though the server client bypasses RLS, every query below explicitly
+ * checks user_id. Therefore one logged-in user cannot access another user's
+ * patient profiles through these functions.
+ */
+function requireUserId(context: { userId?: string } | undefined) {
+  const userId = context?.userId;
+
+  if (!userId) {
+    throw new Error(
+      "You must be signed in to manage patient profiles.",
+    );
+  }
+
+  return userId;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              Error Handling                                */
+/* -------------------------------------------------------------------------- */
+
+function databaseError(
+  error: {
+    message?: string;
+    code?: string;
+    details?: string;
+    hint?: string;
+  } | null,
+) {
+  if (!error) {
+    return "An unknown database error occurred.";
+  }
+
+  if (error.code === "PGRST116") {
+    return "The requested patient profile was not found.";
+  }
+
+  return error.message || "Database operation failed.";
+}
 
 /* -------------------------------------------------------------------------- */
 /*                              Database Mapping                              */
@@ -125,9 +209,8 @@ function toPatientRow(
       input.currentMedications.trim() || null,
 
     /*
-     * Database stores the actual illness description.
-     *
-     * If the answer is "No", the value is NULL.
+     * We store the actual illness description only when
+     * previousMajorIllnesses is Yes.
      */
     previous_major_illnesses:
       input.previousMajorIllnesses === "Yes"
@@ -140,7 +223,7 @@ function toPatientRow(
       input.familyHistory.trim() || null,
 
     /*
-     * Pregnancy information is stored only for female patients.
+     * Male patients never receive pregnancy information.
      */
     pregnancy_status:
       input.sex === "Female"
@@ -150,78 +233,17 @@ function toPatientRow(
 }
 
 /* -------------------------------------------------------------------------- */
-/*                              Authentication                                */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Returns the currently authenticated Supabase user.
- *
- * This deliberately uses the browser Supabase client so the current
- * authenticated session is automatically used.
- *
- * RLS then limits database access to rows owned by this user.
- */
-async function requireAuthenticatedUser() {
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-
-  if (error) {
-    throw new Error(
-      `Unable to verify your login session: ${error.message}`,
-    );
-  }
-
-  if (!user) {
-    throw new Error(
-      "You must be signed in to manage patient profiles.",
-    );
-  }
-
-  return user;
-}
-
-/* -------------------------------------------------------------------------- */
-/*                              Error Handling                                */
-/* -------------------------------------------------------------------------- */
-
-function getDatabaseErrorMessage(
-  error: {
-    message?: string;
-    code?: string;
-    details?: string;
-    hint?: string;
-  } | null,
-) {
-  if (!error) {
-    return "An unknown database error occurred.";
-  }
-
-  /*
-   * Keep the actual Supabase message because it is useful while debugging
-   * Lovable Cloud/RLS/table issues.
-   */
-  return error.message || "Database operation failed.";
-}
-
-/* -------------------------------------------------------------------------- */
 /*                              List Patients                                 */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Load all patient profiles created by the current logged-in user.
- *
- * IMPORTANT:
- * This query is explicitly filtered by user_id.
- *
- * Therefore:
- * User A cannot load User B's patient profiles.
- */
-export async function listPatients() {
-  const user = await requireAuthenticatedUser();
+export const listPatients = createServerFn({
+  method: "GET",
+}).handler(async ({ context }) => {
+  const userId = requireUserId(context);
 
-  const { data, error } = await supabase
+  const supabaseAdmin = await getSupabaseAdmin();
+
+  const { data, error } = await supabaseAdmin
     .from("patient_profiles")
     .select(
       [
@@ -241,226 +263,195 @@ export async function listPatients() {
         "updated_at",
       ].join(","),
     )
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .order("created_at", {
       ascending: false,
     });
 
   if (error) {
     throw new Error(
-      `Unable to load patient profiles: ${getDatabaseErrorMessage(
-        error,
-      )}`,
+      `Unable to load patient profiles: ${databaseError(error)}`,
     );
   }
 
   return data ?? [];
-}
+});
 
 /* -------------------------------------------------------------------------- */
-/*                              Get One Patient                               */
+/*                              Get Patient                                   */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Load one patient profile.
- *
- * The query contains BOTH:
- *   - patient id
- *   - authenticated user's id
- *
- * This prevents accidentally loading another user's patient.
- */
-export async function getPatient(
-  patientId: string,
-) {
-  const user = await requireAuthenticatedUser();
+export const getPatient = createServerFn({
+  method: "GET",
+})
+  .inputValidator(
+    z.object({
+      patientId: z.string().uuid(),
+    }),
+  )
+  .handler(async ({ data, context }) => {
+    const userId = requireUserId(context);
 
-  const parsedId = z
-    .string()
-    .uuid()
-    .safeParse(patientId);
+    const supabaseAdmin = await getSupabaseAdmin();
 
-  if (!parsedId.success) {
-    throw new Error("Invalid patient profile ID.");
-  }
+    const { data: patient, error } = await supabaseAdmin
+      .from("patient_profiles")
+      .select("*")
+      .eq("id", data.patientId)
+      .eq("user_id", userId)
+      .maybeSingle();
 
-  const { data, error } = await supabase
-    .from("patient_profiles")
-    .select("*")
-    .eq("id", parsedId.data)
-    .eq("user_id", user.id)
-    .maybeSingle();
+    if (error) {
+      throw new Error(
+        `Unable to load patient: ${databaseError(error)}`,
+      );
+    }
 
-  if (error) {
-    throw new Error(
-      `Unable to load patient: ${getDatabaseErrorMessage(
-        error,
-      )}`,
-    );
-  }
+    if (!patient) {
+      throw new Error(
+        "Patient profile was not found.",
+      );
+    }
 
-  if (!data) {
-    throw new Error(
-      "Patient profile was not found.",
-    );
-  }
-
-  return data;
-}
+    return patient;
+  });
 
 /* -------------------------------------------------------------------------- */
 /*                              Create Patient                                */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Create a completely separate patient profile.
- *
- * This is NOT connected to the logged-in user's own profile.
- */
-export async function createPatient(
-  input: PatientInput,
-) {
-  const user = await requireAuthenticatedUser();
+export const createPatient = createServerFn({
+  method: "POST",
+})
+  .inputValidator(PatientSchema)
+  .handler(async ({ data, context }) => {
+    const userId = requireUserId(context);
 
-  const parsed = PatientSchema.safeParse(input);
+    const supabaseAdmin = await getSupabaseAdmin();
 
-  if (!parsed.success) {
-    throw new Error(
-      parsed.error.issues[0]?.message ??
-        "Please check the patient information.",
+    const payload = toPatientRow(
+      data,
+      userId,
     );
-  }
 
-  const payload = toPatientRow(
-    parsed.data,
-    user.id,
-  );
+    const { data: patient, error } =
+      await supabaseAdmin
+        .from("patient_profiles")
+        .insert(payload)
+        .select("*")
+        .single();
 
-  const { data: patient, error } = await supabase
-    .from("patient_profiles")
-    .insert(payload)
-    .select("*")
-    .single();
+    if (error) {
+      throw new Error(
+        `Unable to create patient: ${databaseError(error)}`,
+      );
+    }
 
-  if (error) {
-    throw new Error(
-      `Unable to create patient: ${getDatabaseErrorMessage(
-        error,
-      )}`,
-    );
-  }
-
-  return {
-    success: true,
-    patient,
-  };
-}
+    return {
+      success: true,
+      patient,
+    };
+  });
 
 /* -------------------------------------------------------------------------- */
 /*                              Update Patient                                */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Update an existing patient profile.
- *
- * Only the authenticated user's own patient profile can be updated.
- */
-export async function updatePatient(
-  input: PatientInput & {
-    patientId: string;
-  },
-) {
-  const user = await requireAuthenticatedUser();
+export const updatePatient = createServerFn({
+  method: "POST",
+})
+  .inputValidator(
+    PatientSchema.extend({
+      patientId: z.string().uuid(),
+    }),
+  )
+  .handler(async ({ data, context }) => {
+    const userId = requireUserId(context);
 
-  const parsedId = z
-    .string()
-    .uuid()
-    .safeParse(input.patientId);
+    const supabaseAdmin = await getSupabaseAdmin();
 
-  if (!parsedId.success) {
-    throw new Error("Invalid patient profile ID.");
-  }
+    const {
+      patientId,
+      ...patientInput
+    } = data;
 
-  const parsed = PatientSchema.safeParse(input);
+    const payload = {
+      ...toPatientRow(
+        patientInput,
+        userId,
+      ),
 
-  if (!parsed.success) {
-    throw new Error(
-      parsed.error.issues[0]?.message ??
-        "Please check the patient information.",
-    );
-  }
+      updated_at:
+        new Date().toISOString(),
+    };
 
-  const payload = {
-    ...toPatientRow(
-      parsed.data,
-      user.id,
-    ),
+    const { data: patient, error } =
+      await supabaseAdmin
+        .from("patient_profiles")
+        .update(payload)
+        .eq("id", patientId)
+        .eq("user_id", userId)
+        .select("*")
+        .single();
 
-    updated_at:
-      new Date().toISOString(),
-  };
+    if (error) {
+      throw new Error(
+        `Unable to update patient: ${databaseError(error)}`,
+      );
+    }
 
-  const { data: patient, error } = await supabase
-    .from("patient_profiles")
-    .update(payload)
-    .eq("id", parsedId.data)
-    .eq("user_id", user.id)
-    .select("*")
-    .single();
-
-  if (error) {
-    throw new Error(
-      `Unable to update patient: ${getDatabaseErrorMessage(
-        error,
-      )}`,
-    );
-  }
-
-  return {
-    success: true,
-    patient,
-  };
-}
+    return {
+      success: true,
+      patient,
+    };
+  });
 
 /* -------------------------------------------------------------------------- */
 /*                              Delete Patient                                */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Delete a patient profile.
- *
- * The user_id condition ensures the currently logged-in user
- * can delete only their own patient record.
- */
-export async function deletePatient(
-  patientId: string,
-) {
-  const user = await requireAuthenticatedUser();
+export const deletePatient = createServerFn({
+  method: "POST",
+})
+  .inputValidator(
+    z.object({
+      patientId: z.string().uuid(),
+    }),
+  )
+  .handler(async ({ data, context }) => {
+    const userId = requireUserId(context);
 
-  const parsedId = z
-    .string()
-    .uuid()
-    .safeParse(patientId);
+    const supabaseAdmin = await getSupabaseAdmin();
 
-  if (!parsedId.success) {
-    throw new Error("Invalid patient profile ID.");
-  }
+    /*
+     * Ownership check is deliberately repeated here.
+     *
+     * Even though this server client bypasses RLS, a user can delete
+     * only a patient profile belonging to their own account.
+     */
+    const { data: deletedPatient, error } =
+      await supabaseAdmin
+        .from("patient_profiles")
+        .delete()
+        .eq("id", data.patientId)
+        .eq("user_id", userId)
+        .select("id")
+        .maybeSingle();
 
-  const { error } = await supabase
-    .from("patient_profiles")
-    .delete()
-    .eq("id", parsedId.data)
-    .eq("user_id", user.id);
+    if (error) {
+      throw new Error(
+        `Unable to delete patient: ${databaseError(error)}`,
+      );
+    }
 
-  if (error) {
-    throw new Error(
-      `Unable to delete patient: ${getDatabaseErrorMessage(
-        error,
-      )}`,
-    );
-  }
+    if (!deletedPatient) {
+      throw new Error(
+        "Patient profile was not found or does not belong to your account.",
+      );
+    }
 
-  return {
-    success: true,
-  };
-}
+    return {
+      success: true,
+      patientId: deletedPatient.id,
+    };
+  });
