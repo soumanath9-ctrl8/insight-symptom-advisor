@@ -441,7 +441,7 @@ const UI_COLUMNS = [
 
 function toUiRow(input: UiProfileInput) {
   return {
-    name: input.name || null,
+    name: input.name,
     age: input.age || null,
     sex: input.sex || null,
     allergies: input.allergies || null,
@@ -492,7 +492,7 @@ export const getOwnProfile = createServerFn({ method: "GET" }).handler(
       throw new Error(`Unable to load profile: ${databaseError(error)}`);
     }
 
-    return fromUiRow(data as Record<string, unknown> | null);
+    return fromUiRow(data as unknown as Record<string, unknown> | null);
   },
 );
 
@@ -528,10 +528,10 @@ export const updateOwnProfile = createServerFn({ method: "POST" })
         );
       }
 
-      return fromUiRow(inserted as Record<string, unknown>);
+      return fromUiRow(inserted as unknown as Record<string, unknown>);
     }
 
-    return fromUiRow(updated as Record<string, unknown>);
+    return fromUiRow(updated as unknown as Record<string, unknown>);
   });
 
 export const listPatientProfiles = createServerFn({ method: "GET" }).handler(
@@ -542,7 +542,7 @@ export const listPatientProfiles = createServerFn({ method: "GET" }).handler(
     const { data, error } = await supabaseAdmin
       .from("patient_profiles")
       .select("*")
-      .eq("user_id", userId)
+      .eq("owner_user_id", userId)
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -552,13 +552,13 @@ export const listPatientProfiles = createServerFn({ method: "GET" }).handler(
     }
 
     return (data ?? []).map((row) => {
-      const profile = fromUiRow(row as Record<string, unknown>)!;
+      const profile = fromUiRow(row as unknown as Record<string, unknown>)!;
 
       return {
         ...profile,
-        ownerUserId: String((row as Record<string, unknown>)["user_id"] ?? ""),
-        createdAt: String((row as Record<string, unknown>)["created_at"] ?? ""),
-        updatedAt: String((row as Record<string, unknown>)["updated_at"] ?? ""),
+        ownerUserId: String((row as unknown as Record<string, unknown>)["owner_user_id"] ?? ""),
+        createdAt: String((row as unknown as Record<string, unknown>)["created_at"] ?? ""),
+        updatedAt: String((row as unknown as Record<string, unknown>)["updated_at"] ?? ""),
       };
     });
   },
@@ -574,7 +574,7 @@ export const createPatientProfile = createServerFn({ method: "POST" })
 
     const { data: inserted, error } = await supabaseAdmin
       .from("patient_profiles")
-      .insert({ user_id: userId, ...row })
+      .insert({ owner_user_id: userId, ...row })
       .select("*")
       .single();
 
@@ -582,7 +582,7 @@ export const createPatientProfile = createServerFn({ method: "POST" })
       throw new Error(`Unable to create patient: ${databaseError(error)}`);
     }
 
-    return fromUiRow(inserted as Record<string, unknown>);
+    return fromUiRow(inserted as unknown as Record<string, unknown>);
   });
 
 export const updatePatientProfile = createServerFn({ method: "POST" })
@@ -600,7 +600,7 @@ export const updatePatientProfile = createServerFn({ method: "POST" })
       .from("patient_profiles")
       .update(toUiRow(data.profile))
       .eq("id", data.id)
-      .eq("user_id", userId)
+      .eq("owner_user_id", userId)
       .select("*")
       .maybeSingle();
 
@@ -612,7 +612,7 @@ export const updatePatientProfile = createServerFn({ method: "POST" })
       throw new Error("Patient profile was not found.");
     }
 
-    return fromUiRow(updated as Record<string, unknown>);
+    return fromUiRow(updated as unknown as Record<string, unknown>);
   });
 
 export const deletePatientProfile = createServerFn({ method: "POST" })
@@ -625,7 +625,7 @@ export const deletePatientProfile = createServerFn({ method: "POST" })
       .from("patient_profiles")
       .delete()
       .eq("id", data.id)
-      .eq("user_id", userId);
+      .eq("owner_user_id", userId);
 
     if (error) {
       throw new Error(`Unable to delete patient: ${databaseError(error)}`);
