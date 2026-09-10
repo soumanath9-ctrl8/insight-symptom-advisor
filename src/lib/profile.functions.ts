@@ -1,7 +1,5 @@
-import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-import { requireSupabaseServerConfig } from "@/lib/supabase-env.server";
 import { supabase } from "@/integrations/supabase/client";
 
 const SexSchema = z.enum(["Male", "Female"]);
@@ -16,71 +14,133 @@ const ExistingConditionSchema = z.enum([
   "Emergency",
 ]);
 
-const ProfileSchema = z.object({
-  name: z.string().trim().min(1).max(100),
-  age: z.string().trim().max(10).optional().default(""),
-  sex: SexSchema.optional(),
-  allergies: YesNoSchema.optional(),
-  existingConditions: ExistingConditionSchema.optional(),
-  currentMedications: z.string().trim().max(2000).optional().default(""),
-  previousMajorIllnesses: YesNoSchema.optional(),
-  previousMajorIllnessDetails: z.string().trim().max(2000).optional().default(""),
-  smokingStatus: YesNoSchema.optional(),
-  familyHistory: z.string().trim().max(2000).optional().default(""),
-  pregnancyStatus: z.string().trim().max(100).optional().default(""),
-});
+const ProfileSchema = z
+  .object({
+    name: z.string().trim().min(1, "Name is required.").max(100),
+
+    age: z.string().trim().max(10).default(""),
+
+    sex: SexSchema,
+
+    allergies: YesNoSchema,
+
+    existingConditions: ExistingConditionSchema,
+
+    currentMedications: z.string().trim().max(2000).default(""),
+
+    previousMajorIllnesses: YesNoSchema,
+
+    previousMajorIllnessDetails: z
+      .string()
+      .trim()
+      .max(2000)
+      .default(""),
+
+    smokingStatus: YesNoSchema,
+
+    familyHistory: z.string().trim().max(2000).default(""),
+
+    pregnancyStatus: z.string().trim().max(100).default(""),
+  })
+  .superRefine((value, ctx) => {
+    if (
+      value.previousMajorIllnesses === "Yes" &&
+      !value.previousMajorIllnessDetails.trim()
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["previousMajorIllnessDetails"],
+        message: "Please enter the previous major illness.",
+      });
+    }
+
+    if (value.sex === "Male" && value.pregnancyStatus.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["pregnancyStatus"],
+        message:
+          "Pregnancy status is only applicable to female users.",
+      });
+    }
+  });
 
 export type ProfileInput = z.infer<typeof ProfileSchema>;
+
+async function requireUser() {
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+
+  if (error) {
+    throw new Error(
+      `Unable to verify your session: ${error.message}`,
+    );
+  }
+
+  if (!user) {
+    throw new Error("You must be signed in.");
+  }
+
+  return user;
+}
 
 function normaliseProfile(input: ProfileInput) {
   const parsed = ProfileSchema.parse(input);
 
   return {
-    name: parsed.name,
-    age: parsed.age || null,
-    sex: parsed.sex || null,
-    allergies: parsed.allergies || null,
-    existing_conditions: parsed.existingConditions || null,
-    current_medications: parsed.currentMedications || null,
+    name: parsed.name.trim(),
+
+    age: parsed.age.trim() || null,
+
+    sex: parsed.sex,
+
+    allergies: parsed.allergies,
+
+    existing_conditions: parsed.existingConditions,
+
+    current_medications:
+      parsed.currentMedications.trim() || null,
+
     previous_major_illnesses:
       parsed.previousMajorIllnesses === "Yes"
-        ? parsed.previousMajorIllnessDetails || null
+        ? parsed.previousMajorIllnessDetails.trim() || null
         : null,
-    smoking_status: parsed.smokingStatus || null,
-    family_history: parsed.familyHistory || null,
+
+    smoking_status: parsed.smokingStatus,
+
+    family_history:
+      parsed.familyHistory.trim() || null,
+
     pregnancy_status:
       parsed.sex === "Female"
-        ? parsed.pregnancyStatus || null
+        ? parsed.pregnancyStatus.trim() || null
         : null,
+
     updated_at: new Date().toISOString(),
   };
 }
 
 /**
- * Check whether Supabase is configured.
- * This is deliberately public and does not expose any secret.
+ * Check that the authenticated Supabase session is available.
+ *
+ * Kept for compatibility with the existing UI.
  */
-export const checkSupabaseConfig = createServerFn({
-  method: "GET",
-}).handler(async () => {
-  const config = requireSupabaseServerConfig();
+export async function checkSupabaseConfig() {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   return {
-    configured: config.configured,
+    configured: Boolean(user),
   };
-});
+}
 
 /**
- * Read the logged-in user's own profile.
+ * Read the currently logged-in user's own profile.
  */
-export const getProfile = createServerFn({
-  method: "GET",
-}).handler(async ({ context }) => {
-  const config = requireSupabaseServerConfig();
-
-  if (!context?.userId) {
-    throw new Error("You must be signed in.");
-  }
+export async function getProfile() {
+  const user = await requireUser();
 
   const { data, error } = await supabase
     .from("profiles")
@@ -101,64 +161,69 @@ export const getProfile = createServerFn({
         "updated_at",
       ].join(","),
     )
-    .eq("id", context.userId)
+    .eq("id", user.id)
     .maybeSingle();
 
   if (error) {
-    throw new Error(`Unable to load profile: ${error.message}`);
+    throw new Error(
+      `Unable to load profile: ${error.message}`,
+    );
   }
 
   return {
-    configured: config.configured,
+    configured: true,
     profile: data,
   };
-});
+}
 
 /**
- * Update the logged-in user's own profile.
+ * Save the currently logged-in user's own profile.
  */
-export const saveProfile = createServerFn({
-  method: "POST",
-})
-  .inputValidator(ProfileSchema)
-  .handler(async ({ data, context }) => {
-    requireSupabaseServerConfig();
+export async function saveProfile(input: ProfileInput) {
+  const user = await requireUser();
 
-    if (!context?.userId) {
-      throw new Error("You must be signed in.");
-    }
+  const parsed = ProfileSchema.safeParse(input);
 
-    const payload = normaliseProfile(data);
+  if (!parsed.success) {
+    throw new Error(
+      parsed.error.issues[0]?.message ??
+        "Please check your profile information.",
+    );
+  }
 
-    const { data: saved, error } = await supabase
-      .from("profiles")
-      .update(payload)
-      .eq("id", context.userId)
-      .select(
-        [
-          "id",
-          "name",
-          "age",
-          "sex",
-          "allergies",
-          "existing_conditions",
-          "current_medications",
-          "previous_major_illnesses",
-          "smoking_status",
-          "family_history",
-          "pregnancy_status",
-          "created_at",
-          "updated_at",
-        ].join(","),
-      )
-      .single();
+  const payload = normaliseProfile(parsed.data);
 
-    if (error) {
-      throw new Error(`Unable to save profile: ${error.message}`);
-    }
+  const { data: saved, error } = await supabase
+    .from("profiles")
+    .update(payload)
+    .eq("id", user.id)
+    .select(
+      [
+        "id",
+        "name",
+        "age",
+        "sex",
+        "allergies",
+        "existing_conditions",
+        "current_medications",
+        "previous_major_illnesses",
+        "smoking_status",
+        "family_history",
+        "pregnancy_status",
+        "created_at",
+        "updated_at",
+      ].join(","),
+    )
+    .single();
 
-    return {
-      success: true,
-      profile: saved,
-    };
-  });
+  if (error) {
+    throw new Error(
+      `Unable to save profile: ${error.message}`,
+    );
+  }
+
+  return {
+    success: true,
+    profile: saved,
+  };
+}
