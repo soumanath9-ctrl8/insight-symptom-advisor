@@ -121,7 +121,7 @@ function Landing() {
   useEffect(() => {
     let active = true;
     void supabase.auth.getSession().then(({ data }) => {
-      if (active && data.session) navigate({ to: "/checker", replace: true });
+      if (active && data.session) navigate({ to: "/home", replace: true });
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       if (session) navigate({ to: "/checker", replace: true });
