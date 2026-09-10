@@ -2,7 +2,17 @@ import { createServerFn } from "@tanstack/react-start";
 import { streamText } from "ai";
 import { z } from "zod";
 
-import { detectRedFlags, redFlagUrgencyNotice } from "./red-flags";
+import { detectRedFlags, redFlagUrgencyNotice, type RedFlagResult } from "./red-flags";
+import {
+  KNOWLEDGE_PROVENANCE,
+  QUESTION_TEMPLATES,
+  SAFETY_GUARDRAILS,
+  ageGuidance,
+  pregnancyGuidance,
+} from "./medical-knowledge";
+import { validateAssessment } from "./safety-validator";
+import { describeVitals, extractVitals, flagVitals, type Vitals } from "./vitals";
+
 
 
 const ContextInput = z.object({
