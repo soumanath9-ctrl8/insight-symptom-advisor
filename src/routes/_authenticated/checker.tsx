@@ -25,6 +25,7 @@ import {
 } from "@/lib/symptoms.functions";
 import { LangContext, useLang, type Lang } from "@/lib/i18n";
 import { topRisk } from "@/lib/history";
+import { extractVitals } from "@/lib/vitals";
 import { getProfile, saveCheck } from "@/lib/history.functions";
 import { openReport } from "@/lib/report";
 import { EmergencyHelp } from "@/components/EmergencyHelp";
