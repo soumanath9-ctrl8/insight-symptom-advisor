@@ -199,14 +199,7 @@ function AppBody() {
   // Emergency results are always recorded in the patient's history.
   useEffect(() => {
     if (!result || !isEmergency || savedId !== null) return;
-    const top = topRisk(result);
-    saveMutation.mutate({
-      symptoms: symptoms.trim(),
-      severity: top.likelihood,
-      urgency: result.urgency,
-      topCondition: top.name,
-      summary: result.summary,
-    });
+    saveMutation.mutate(buildRecord(result));
     setSavedId("saved");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result, isEmergency, savedId]);
