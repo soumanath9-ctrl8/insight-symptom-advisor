@@ -544,14 +544,7 @@ function AppBody() {
                         size="sm"
                         disabled={savedId !== null}
                         onClick={() => {
-                          const top = topRisk(result);
-                          saveMutation.mutate({
-                            symptoms: symptoms.trim(),
-                            severity: top.likelihood,
-                            urgency: result.urgency,
-                            topCondition: top.name,
-                            summary: result.summary,
-                          });
+                          saveMutation.mutate(buildRecord(result));
                           setSavedId("saved");
                         }}
                       >
