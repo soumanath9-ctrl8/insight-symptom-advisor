@@ -246,11 +246,18 @@ export const getFollowUpQuestions = createServerFn({ method: "POST" })
     return QuestionsSchema.parse(raw).questions;
   });
 
+const WORSENING = [
+  /\bworse|worsening|deteriorat|not improving|no better|getting bad/i,
+  /খারাপ হচ্ছে|আরও খারাপ|উন্নতি হচ্ছে না/,
+];
+
 export const assessSymptoms = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => AssessmentInput.parse(input))
-  .handler(async ({ data }) => {
-    // Deterministic safety pass BEFORE the AI reasoning.
-    const redFlagCheck = detectRedFlags({
+  .handler(async ({ data, context }) => {
+    // 1. Deterministic Red-Flag Rule Engine (symptoms + reported vitals) —
+    //    runs BEFORE any AI reasoning and always takes priority over it.
+    const redFlagCheck = safetyScreen({
       symptoms: data.symptoms,
       answers: data.answers,
       age: data.age,
@@ -258,40 +265,82 @@ export const assessSymptoms = createServerFn({ method: "POST" })
       language: data.language,
     });
 
+    const text = [data.symptoms, ...data.answers.map((a) => a.answer)].join("\n");
+    const trajectoryWorse = WORSENING.some((p) => p.test(text));
+
+    // 2. Reassessment: compare against this patient's recent checks so that new
+    //    warning signs or worsening symptoms cannot stay at a previous low risk.
+    let previous: {
+      created_at: string;
+      urgency: string;
+      severity: number;
+      top_condition: string;
+      symptoms: string;
+    }[] = [];
+    try {
+      const { data: rows } = await context.supabase
+        .from("symptom_checks")
+        .select("created_at, urgency, severity, top_condition, symptoms")
+        .order("created_at", { ascending: false })
+        .limit(3);
+      previous = (rows ?? []) as typeof previous;
+    } catch {
+      previous = [];
+    }
+    const previousWasLow = previous.some(
+      (p) => p.urgency === "self-care" || p.urgency === "see-a-doctor",
+    );
+    const worseningOverride =
+      (trajectoryWorse && previous.length > 0) ||
+      (previousWasLow && redFlagCheck.level !== null);
+
+    const vitalsLine = describeVitals(redFlagCheck.vitals);
+    const pregnancy = pregnancyGuidance(data.sex, data.age);
+
     const raw = AssessmentSchema.parse(
       await callModel(
         [
           "You are a careful, calibrated clinical triage assistant. Accuracy and calm framing matter more than caution theatre.",
+          ...SAFETY_GUARDRAILS,
+          `KNOWLEDGE BASIS: ${KNOWLEDGE_PROVENANCE} Never claim this tool is clinically validated or approved.`,
           "CALIBRATION RULES (critical):",
-          "1. Score every condition on the FULL combination of symptoms, their duration, severity, the follow-up answers and patient context together.",
+          "1. Score every condition on the FULL combination of symptoms, their duration, severity, trajectory, the follow-up answers and patient context together.",
           "2. Never let a single non-specific symptom (e.g. a dry cough, a mild headache) push a serious condition high. In isolation such a symptom supports only common, benign explanations.",
           "3. 'likelihood' is NOT a validated diagnostic probability. It is a 0-100 SYMPTOM-MATCH STRENGTH: how well the reported findings fit that explanation. It must never be presented or worded as a medical probability, and the set need not sum to 100. Keep serious conditions low (typically under 15) when only weak, non-specific evidence exists.",
           "4. riskLevel is 'high' only when the combination is genuinely dangerous or time-critical; 'moderate' when review is sensible; otherwise 'low'.",
           "5. urgency is 'emergency' or 'urgent' only for genuinely emergency-level combinations or clear red flags. Otherwise use 'self-care' or 'see-a-doctor'.",
           "6. DIFFERENTIAL: never settle on one single answer. Give 3-5 plausible explanations, ranked, from broad categories to specific ones (e.g. 'viral respiratory infection', then 'bronchitis', then 'pneumonia'). Where the picture allows, include at least one NON-DISEASE explanation such as a medication side effect, a musculoskeletal cause, dehydration, poor sleep, or stress/anxiety-related symptoms.",
-          "7. NEVER DIAGNOSE. Never write 'you have X' or 'this is X'. Phrase every item as a possible explanation: 'symptoms may be consistent with...', 'further medical evaluation may be appropriate'.",
+          `7. AGE AWARENESS: ${ageGuidance(data.age)}`,
+          pregnancy ? `8. ${pregnancy}` : "",
           redFlagCheck.level
             ? `SAFETY OVERRIDE: a deterministic red-flag screen already classified this presentation as ${redFlagCheck.level}. You MUST treat it at least that seriously (critical => "emergency"), explain why plainly, and give emergency-oriented next steps. Detected: ${redFlagCheck.hits.map((h) => h.id).join(", ")}.`
             : "",
-          "TONE: for low and moderate results be warm, calm and reassuring, explicitly noting what makes serious causes unlikely. Reserve urgent, directive language for true emergencies. Never claim a diagnosis.",
-          "riskRationale: one or two sentences naming the specific COMBINATION of factors (symptoms + duration + context) that produced this risk level, and stating plainly that no single symptom drove it.",
-          "contributingFactors: 3-5 items drawn ONLY from what the patient actually reported or from stated context (symptom, duration, severity, age-related risk, an answer they gave). weight 0-100 for how much that factor moved this score, effect = 'increases' | 'decreases' | 'neutral'. Keep each factor a short observable finding, not a reasoning narrative, and never expose step-by-step internal deliberation.",
+          worseningOverride
+            ? "REASSESSMENT OVERRIDE: this patient has earlier checks on record and their symptoms are described as worsening or new warning signs have appeared. Do not return a lower urgency than 'see-a-doctor', and say plainly that the picture has changed since the last check."
+            : "",
+          vitalsLine
+            ? "VITAL SIGNS: use the patient-reported measurements below as supporting signals only. Never invent, estimate or complete any measurement that was not reported, and never state that unreported vitals are normal."
+            : "VITAL SIGNS: none were reported. Treat every vital sign as UNKNOWN, list the useful ones under missingInfo, and never assume they are normal.",
+          "TONE: for low and moderate results be warm, calm and reassuring, explicitly noting what makes serious causes unlikely — but never give false reassurance and never say a doctor is unnecessary. Reserve urgent, directive language for true emergencies.",
+          "riskRationale: one or two sentences naming the specific COMBINATION of factors (symptoms + duration + trajectory + context) that produced this risk level, and stating plainly that no single symptom drove it.",
+          "contributingFactors: 3-5 items drawn ONLY from what the patient actually reported or from stated context (symptom, duration, trajectory, a reported measurement, age-related risk, an answer they gave). weight 0-100 for how much that factor moved this score, effect = 'increases' | 'decreases' | 'neutral'. Keep each factor a short observable finding, not a reasoning narrative, and never expose step-by-step internal deliberation.",
           "matchingSymptoms: quote only findings the patient actually reported. Never list a finding they did not mention.",
-          "CARE GUIDANCE: for low/moderate riskLevel give general self-care measures (rest, fluids, monitoring) and reliefCategories as CATEGORIES ONLY, e.g. 'a fever reducer such as paracetamol, taken as per package instructions'. Never give a prescription, never give doses, schedules, or prescription-only drugs. For high riskLevel leave selfCare and reliefCategories as empty arrays and put emergency-oriented wording in nextSteps.",
-          "HONESTY ABOUT GAPS: never invent, assume or fill in details the patient did not give (no invented temperatures, durations, exposures or history). Do NOT assume vital signs are normal, do NOT assume the absence of existing medical conditions, medicines, pregnancy or allergies — treat all of these as unknown unless stated. List each important detail that is still missing in missingInfo, in the patient's own plain language. Set confidence to 'low' when key details are missing, answers were skipped or the picture is vague, 'moderate' when the history is partial, 'high' only when the reported combination is clear. confidenceNote: one short sentence saying why, and what would sharpen it. When confidence is low, say so plainly in summary, keep every match strength modest, and widen rather than narrow the list of explanations.",
-
+          "CARE GUIDANCE: for low/moderate riskLevel give general self-care measures (rest, fluids, monitoring) and reliefCategories as CATEGORIES ONLY, e.g. 'a fever reducer available over the counter, used as per the package instructions'. Never name a prescription-only medicine, never give a dose, strength, frequency or duration, never mention antibiotics as something to take, and never suggest changing or stopping an existing medicine. For high riskLevel leave selfCare and reliefCategories as empty arrays and put emergency-oriented wording in nextSteps.",
+          "HONESTY ABOUT GAPS: never invent, assume or fill in details the patient did not give (no invented temperatures, blood pressures, oxygen levels, lab results, durations, exposures or history). Do NOT assume the absence of existing medical conditions, medicines, pregnancy or allergies — treat every one of these as UNKNOWN unless stated. List each important detail that is still missing in missingInfo, in the patient's own plain language. Set confidence to 'low' when key details are missing, answers were skipped or the picture is vague, 'moderate' when the history is partial, 'high' only when the reported combination is clear. confidenceNote: one short sentence saying why, and what would sharpen it. When confidence is low, say so plainly in summary, keep every match strength modest, and widen rather than narrow the list of explanations.",
+          "nextStep: one short, concrete sentence naming the single most useful action now (self-care and monitoring, pharmacist advice, seeing a doctor within days, same-day review, or emergency care).",
           langLine(data.language),
           "Reply with ONLY JSON (no markdown fences) of this exact shape:",
           '{"summary": string, "urgency": "self-care"|"see-a-doctor"|"urgent"|"emergency", "urgencyReason": string,',
           '"conditions":[{"name": string, "riskLevel": "low"|"moderate"|"high", "likelihood": number, "explanation": string,',
           '"riskRationale": string, "matchingSymptoms": string[], "contributingFactors":[{"factor": string, "weight": number, "effect": string}],',
           '"nextSteps": string, "selfCare": string[], "reliefCategories": string[]}],',
-          '"redFlags": string[], "generalAdvice": string, "confidence": "low"|"moderate"|"high", "confidenceNote": string, "missingInfo": string[]}',
+          '"redFlags": string[], "generalAdvice": string, "confidence": "low"|"moderate"|"high", "confidenceNote": string, "missingInfo": string[], "nextStep": string}',
         ]
           .filter(Boolean)
           .join(" "),
         [
           contextBlock(data),
+          vitalsLine,
           data.answers.length
             ? "History answers:\n" +
               data.answers.map((a) => `Q: ${a.question}\nA: ${a.answer}`).join("\n")
@@ -300,63 +349,56 @@ export const assessSymptoms = createServerFn({ method: "POST" })
             ? "Deterministic red flags detected:\n" +
               redFlagCheck.hits.map((h) => `- [${h.severity}] ${h.message}`).join("\n")
             : "",
+          previous.length
+            ? "This patient's previous checks (most recent first), for comparison:\n" +
+              previous
+                .map(
+                  (p) =>
+                    `- ${p.created_at}: urgency ${p.urgency}, top match ${p.top_condition} (${p.severity}), symptoms: ${p.symptoms}`,
+                )
+                .join("\n")
+            : "",
+          trajectoryWorse ? "Trajectory: the patient describes the problem as worsening." : "",
         ]
           .filter(Boolean)
           .join("\n\n"),
       ),
     );
 
-    let urgency = normalizeUrgency(raw.urgency);
+    const urgency = normalizeUrgency(raw.urgency);
     let urgencyReason = raw.urgencyReason;
-    let redFlags = raw.redFlags;
-
-    // The AI can never downgrade a deterministic red flag.
     if (redFlagCheck.level) {
-      const floor: Urgency = redFlagCheck.level === "critical" ? "emergency" : "urgent";
-      const order: Urgency[] = ["self-care", "see-a-doctor", "urgent", "emergency"];
-      if (order.indexOf(urgency) < order.indexOf(floor)) urgency = floor;
-      const notice = redFlagUrgencyNotice(redFlagCheck.level, data.language);
-      urgencyReason = `${notice} ${urgencyReason}`.trim();
-      const detected = redFlagCheck.hits.map((h) => h.message);
-      redFlags = [...detected, ...redFlags.filter((f) => !detected.includes(f))];
+      urgencyReason = `${redFlagUrgencyNotice(redFlagCheck.level, data.language)} ${urgencyReason}`.trim();
     }
 
-    const emergency = urgency === "emergency" || urgency === "urgent";
-    const confidence = normalizeConfidence(raw.confidence);
-
-    // Match strengths are symptom-fit scores, not validated probabilities, so
-    // they are damped whenever the history is incomplete: a thin picture can
-    // never produce a near-certain-looking number.
-    const cap = confidence === "high" ? 92 : confidence === "moderate" ? 78 : 60;
     const answeredCount = data.answers.filter((a) => a.answer.trim().length > 0).length;
-    const gapPenalty = Math.min(20, raw.missingInfo.length * 5 + (answeredCount < 2 ? 8 : 0));
+    const mentionsHistory =
+      /\b(diabet|hypertens|asthma|heart|kidney|cancer|pregnan|allerg|medicine|medication|tablet)\b/i.test(
+        text,
+      ) || /ডায়াবেটিস|উচ্চ রক্তচাপ|হাঁপানি|অ্যালার্জি|ঔষধ/.test(text);
 
-    return {
-      ...raw,
-      urgency,
-      urgencyReason,
-      redFlags,
-      confidence,
-      conditions: raw.conditions
-        .map((c) => {
-          const riskLevel =
-            redFlagCheck.level === "critical" && c === raw.conditions[0]
-              ? "high"
-              : normalizeRisk(c.riskLevel);
-          const likelihood = Math.max(
-            1,
-            Math.round(Math.min(cap, Math.max(0, c.likelihood)) * (1 - gapPenalty / 100)),
-          );
-          return {
-            ...c,
-            riskLevel,
-            likelihood,
-            ...(riskLevel === "high" || emergency ? { selfCare: [], reliefCategories: [] } : {}),
-          };
-        })
-        .sort((a, b) => b.likelihood - a.likelihood),
-    } satisfies Assessment;
+    // 3. Final Safety Validator — the last gate before the existing result UI.
+    const { assessment } = validateAssessment({
+      assessment: {
+        ...raw,
+        urgency,
+        urgencyReason,
+        confidence: normalizeConfidence(raw.confidence),
+        conditions: raw.conditions.map((c) => ({
+          ...c,
+          riskLevel: normalizeRisk(c.riskLevel),
+        })),
+      },
+      redFlagLevel: redFlagCheck.level,
+      redFlagMessages: redFlagCheck.hits.map((h) => h.message),
+      language: data.language,
+      age: data.age,
+      hasUnknownHistory: !mentionsHistory,
+      contradictionUnresolved: answeredCount === 0,
+      worseningOverride,
+    });
 
+    return assessment as Assessment;
   });
 
 const ClarifySchema = z.object({
