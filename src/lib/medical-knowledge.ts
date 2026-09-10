@@ -93,7 +93,7 @@ export const QUESTION_TEMPLATES = [
 export const BANNED_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /\b(you (definitely )?have|this is (definitely )?a?\s?(case of)?|diagnos(is|ed|e) (is|of)|confirmed (case|diagnosis))\b/i, label: "diagnosis-claim" },
   { pattern: /\b(nothing to worry about|no need to (see|consult) a doctor|definitely not serious|completely harmless|will (go away|pass) on its own|no cause for concern)\b/i, label: "false-reassurance" },
-  { pattern: /\b(stop|discontinue|reduce|pause|skip) (taking |your )?(the )?(medicine|medication|tablets|drugs|pills|treatment)\b/i, label: "medication-stopping" },
+  { pattern: /\b(stop|discontinue|reduce|pause|skip)\s+(taking\s+)?(your\s+|the\s+|his\s+|her\s+|their\s+|any\s+|current\s+|regular\s+)*(medicine|medication|medications|tablets|drugs|pills|treatment|prescription)\b/i, label: "medication-stopping" },
   { pattern: /\b(antibiotic|amoxicillin|azithromycin|ciprofloxacin|doxycycline|prednisolone|dexamethasone|tramadol|codeine|morphine|diazepam|alprazolam|warfarin|insulin dose)\b/i, label: "unsafe-medication" },
   { pattern: /\b\d+\s?(mg|mcg|ml|g|iu)\b/i, label: "dosage" },
   { pattern: /\b(twice|thrice|three times|two times|once) (a|per) day\b/i, label: "dosing-schedule" },
