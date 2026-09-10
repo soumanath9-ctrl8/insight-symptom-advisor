@@ -14,29 +14,101 @@ export type Database = {
   }
   public: {
     Tables: {
-      profiles: {
+      patient_profiles: {
         Row: {
           age: string | null
+          allergies: string | null
           created_at: string
+          current_medications: string | null
+          existing_conditions: string | null
+          family_history: string | null
           id: string
           name: string
+          owner_user_id: string
+          pregnancy_status: string | null
+          previous_major_illnesses: string | null
           sex: string | null
+          smoking_status: string | null
           updated_at: string
         }
         Insert: {
           age?: string | null
+          allergies?: string | null
           created_at?: string
-          id: string
+          current_medications?: string | null
+          existing_conditions?: string | null
+          family_history?: string | null
+          id?: string
           name?: string
+          owner_user_id: string
+          pregnancy_status?: string | null
+          previous_major_illnesses?: string | null
           sex?: string | null
+          smoking_status?: string | null
           updated_at?: string
         }
         Update: {
           age?: string | null
+          allergies?: string | null
           created_at?: string
+          current_medications?: string | null
+          existing_conditions?: string | null
+          family_history?: string | null
           id?: string
           name?: string
+          owner_user_id?: string
+          pregnancy_status?: string | null
+          previous_major_illnesses?: string | null
           sex?: string | null
+          smoking_status?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          age: string | null
+          allergies: string | null
+          created_at: string
+          current_medications: string | null
+          existing_conditions: string | null
+          family_history: string | null
+          id: string
+          name: string
+          pregnancy_status: string | null
+          previous_major_illnesses: string | null
+          sex: string | null
+          smoking_status: string | null
+          updated_at: string
+        }
+        Insert: {
+          age?: string | null
+          allergies?: string | null
+          created_at?: string
+          current_medications?: string | null
+          existing_conditions?: string | null
+          family_history?: string | null
+          id: string
+          name?: string
+          pregnancy_status?: string | null
+          previous_major_illnesses?: string | null
+          sex?: string | null
+          smoking_status?: string | null
+          updated_at?: string
+        }
+        Update: {
+          age?: string | null
+          allergies?: string | null
+          created_at?: string
+          current_medications?: string | null
+          existing_conditions?: string | null
+          family_history?: string | null
+          id?: string
+          name?: string
+          pregnancy_status?: string | null
+          previous_major_illnesses?: string | null
+          sex?: string | null
+          smoking_status?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -48,9 +120,11 @@ export type Database = {
           created_at: string
           id: string
           next_step: string
+          patient_id: string | null
           red_flag: boolean
           red_flags: Json
           severity: number
+          subject_type: string
           summary: string
           supporting_factors: Json
           symptoms: string
@@ -66,9 +140,11 @@ export type Database = {
           created_at?: string
           id?: string
           next_step?: string
+          patient_id?: string | null
           red_flag?: boolean
           red_flags?: Json
           severity?: number
+          subject_type?: string
           summary?: string
           supporting_factors?: Json
           symptoms: string
@@ -84,9 +160,11 @@ export type Database = {
           created_at?: string
           id?: string
           next_step?: string
+          patient_id?: string | null
           red_flag?: boolean
           red_flags?: Json
           severity?: number
+          subject_type?: string
           summary?: string
           supporting_factors?: Json
           symptoms?: string
@@ -96,7 +174,15 @@ export type Database = {
           user_id?: string
           vitals?: Json
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "symptom_checks_patient_id_fkey"
+            columns: ["patient_id"]
+            isOneToOne: false
+            referencedRelation: "patient_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
