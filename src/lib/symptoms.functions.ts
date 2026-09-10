@@ -97,19 +97,53 @@ function normalizeConfidence(value: string): Confidence {
   return "moderate";
 }
 
-/**
- * Deterministic, AI-free emergency result. Used to short-circuit the flow the
- * moment a life-threatening warning sign appears, so the emergency screen
- * (112 / 108 + nearby hospitals) is shown before any normal prediction.
- */
-export function immediateEmergencyAssessment(input: {
+type SafetyInput = {
   symptoms: string;
   answers?: { question: string; answer: string }[] | undefined;
   age?: string | undefined;
   duration?: string | undefined;
   language?: "en" | "bn" | undefined;
-}): Assessment | null {
-  const check = detectRedFlags(input);
+};
+
+function allText(input: SafetyInput) {
+  return [
+    input.symptoms,
+    input.duration ?? "",
+    ...(input.answers ?? []).map((a) => `${a.question} ${a.answer}`),
+  ].join("\n");
+}
+
+/**
+ * Deterministic Red-Flag Rule Engine: symptom rules PLUS any vital signs the
+ * patient actually reported. Runs before, and takes priority over, the AI.
+ */
+export function safetyScreen(input: SafetyInput): RedFlagResult & { vitals: Vitals } {
+  const lang = input.language === "bn" ? "bn" : "en";
+  const base = detectRedFlags(input);
+  const vitals = extractVitals(allText(input));
+  const hits = [
+    ...base.hits,
+    ...flagVitals(vitals).map((f, i) => ({
+      id: `vital-${i}`,
+      severity: f.severity,
+      message: f.message[lang],
+    })),
+  ];
+  const level = hits.some((h) => h.severity === "critical")
+    ? ("critical" as const)
+    : hits.length
+      ? ("urgent" as const)
+      : null;
+  return { hits, level, vitals };
+}
+
+/**
+ * Deterministic, AI-free emergency result. Used to short-circuit the flow the
+ * moment a life-threatening warning sign appears, so the emergency screen
+ * (112 / 108 + nearby hospitals) is shown before any normal prediction.
+ */
+export function immediateEmergencyAssessment(input: SafetyInput): Assessment | null {
+  const check = safetyScreen(input);
   if (check.level !== "critical") return null;
   const lang = input.language === "bn" ? "bn" : "en";
   const notice = redFlagUrgencyNotice("critical", lang);
@@ -132,6 +166,10 @@ export function immediateEmergencyAssessment(input: {
         ? "এটি নিয়মভিত্তিক সুরক্ষা যাচাই — এআই অনুমান নয়।"
         : "This comes from a rule-based safety check, not an AI guess.",
     missingInfo: [],
+    nextStep:
+      lang === "bn"
+        ? "এখনই ১১২ বা ১০৮-এ কল করুন বা নিকটতম আপৎকালীন বিভাগে যান।"
+        : "Call 112 or 108 now, or go to the nearest emergency department.",
   };
 }
 
