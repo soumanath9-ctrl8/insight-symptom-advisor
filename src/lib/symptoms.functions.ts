@@ -240,7 +240,9 @@ export const getFollowUpQuestions = createServerFn({ method: "POST" })
         langLine(data.language),
         "Reply with ONLY JSON (no markdown fences):",
         '{"questions":[{"question": string, "why": string, "options": string[]}]}',
-      ].join(" "),
+      ]
+        .filter(Boolean)
+        .join(" "),
       contextBlock(data),
     );
     return QuestionsSchema.parse(raw).questions;
