@@ -95,14 +95,14 @@ function HistoryBody() {
   const latestMatchStrength =
     sortedHistory.length > 0
       ? normalizeMatchStrength(
-          sortedHistory[sortedHistory.length - 1].severity,
+          sortedHistory[sortedHistory.length - 1]?.severity ?? 0,
         )
       : 0;
 
   const previousMatchStrength =
     sortedHistory.length > 1
       ? normalizeMatchStrength(
-          sortedHistory[sortedHistory.length - 2].severity,
+          sortedHistory[sortedHistory.length - 2]?.severity ?? 0,
         )
       : null;
 

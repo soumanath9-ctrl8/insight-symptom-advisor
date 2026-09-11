@@ -173,7 +173,7 @@ function AppBody() {
   });
 
   const saveMutation = useMutation({
-    mutationFn: (vars: Parameters<typeof saveCheck>[0]["data"]) =>
+    mutationFn: (vars: ReturnType<typeof buildRecord>) =>
       saveFn({ data: vars }),
 
     onSuccess: (saved) => {
@@ -1310,13 +1310,10 @@ function AppBody() {
                                               factor,
                                             ) => (
                                               <li
-                                                key={
-                                                  factor
-                                                }
+                                                key={factor.factor}
                                               >
-                                                {
-                                                  factor
-                                                }
+                                                {factor.factor}
+                                                {factor.effect ? ` — ${factor.effect}` : ""}
                                               </li>
                                             ),
                                           )}
@@ -1324,9 +1321,9 @@ function AppBody() {
                                       </div>
                                     )}
 
-                                    {condition.contradictingFactors
-                                      ?.length >
-                                      0 && (
+                                    {condition.contributingFactors.some(
+                                      (factor) => factor.weight < 0,
+                                    ) && (
                                       <div>
                                         <p className="mb-1 font-medium">
                                           {lang ===
@@ -1336,18 +1333,14 @@ function AppBody() {
                                         </p>
 
                                         <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
-                                          {condition.contradictingFactors.map(
-                                            (
-                                              factor,
-                                            ) => (
+                                          {condition.contributingFactors
+                                            .filter((factor) => factor.weight < 0)
+                                            .map((factor) => (
                                               <li
-                                                key={
-                                                  factor
-                                                }
+                                                key={factor.factor}
                                               >
-                                                {
-                                                  factor
-                                                }
+                                                {factor.factor}
+                                                {factor.effect ? ` — ${factor.effect}` : ""}
                                               </li>
                                             ),
                                           )}
