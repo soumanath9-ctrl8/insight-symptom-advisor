@@ -172,22 +172,54 @@ function HistoryBody() {
     useQueryClient();
 
   /* ------------------------------------------------------------------------ */
-  /*                              Load History                                */
+  /*                         Load SELF History Only                           */
   /* ------------------------------------------------------------------------ */
 
   const historyQuery =
     useQuery({
+      /*
+       * IMPORTANT:
+       * This cache key belongs exclusively to the logged-in user's
+       * self-check history.
+       *
+       * Patient history uses:
+       * ["patient-checks", patientId]
+       *
+       * Therefore the two histories cannot share the same React Query cache.
+       */
       queryKey: [
-        "checks",
+        "self-checks",
       ],
 
       queryFn: () =>
         listFn({}),
     });
 
+  /*
+   * Server-side listChecks() already guarantees:
+   *
+   * subject_type = "self"
+   * patient_id IS NULL
+   *
+   * The additional client-side filter is intentionally defensive.
+   * It prevents a malformed/legacy record from ever appearing
+   * in the Self History UI.
+   */
   const history: HistoryEntry[] =
-    historyQuery.data ??
-    [];
+    useMemo(() => {
+      const records =
+        historyQuery.data ??
+        [];
+
+      return records.filter(
+        (entry) =>
+          entry.subjectType ===
+            "self" &&
+          !entry.patientId,
+      );
+    }, [
+      historyQuery.data,
+    ]);
 
   /* ------------------------------------------------------------------------ */
   /*                              Delete Entry                                */
@@ -207,10 +239,15 @@ function HistoryBody() {
 
       onSuccess:
         async () => {
+          /*
+           * Invalidate ONLY self-history.
+           *
+           * Patient histories use a completely different query key.
+           */
           await queryClient.invalidateQueries(
             {
               queryKey: [
-                "checks",
+                "self-checks",
               ],
             },
           );
@@ -237,7 +274,9 @@ function HistoryBody() {
             b.date,
           ).getTime(),
       );
-    }, [history]);
+    }, [
+      history,
+    ]);
 
   /* ------------------------------------------------------------------------ */
   /*                         Latest Match Strength                            */
@@ -288,7 +327,7 @@ function HistoryBody() {
           : "stable";
 
   /* ------------------------------------------------------------------------ */
-  /*                         Average Match Strength                            */
+  /*                         Average Match Strength                           */
   /* ------------------------------------------------------------------------ */
 
   const averageMatchStrength =
