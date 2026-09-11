@@ -83,7 +83,7 @@ const SaveCheckSchema = z.object({
     .default([]),
 
   vitals: z
-    .record(z.string(), z.unknown())
+    .record(z.string(), z.number())
     .optional()
     .nullable(),
 

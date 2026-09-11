@@ -173,9 +173,8 @@ function AppBody() {
   });
 
   const saveMutation = useMutation({
-    mutationFn: (
-      vars: Parameters<typeof saveFn>[0]["data"],
-    ) => saveFn({ data: vars }),
+    mutationFn: (vars: Parameters<typeof saveCheck>[0]["data"]) =>
+      saveFn({ data: vars }),
 
     onSuccess: (saved) => {
       /**
@@ -274,7 +273,7 @@ function AppBody() {
 
       urgency: assessment.urgency,
 
-      topCondition: top.name,
+      topCondition: top.condition?.name ?? "",
 
       summary: assessment.summary,
 

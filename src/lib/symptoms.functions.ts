@@ -263,13 +263,13 @@ type SafetyInput = {
   answers?: {
     question: string;
     answer: string;
-  }[];
+  }[] | undefined;
 
-  age?: string;
+  age?: string | undefined;
 
-  duration?: string;
+  duration?: string | undefined;
 
-  language?: "en" | "bn";
+  language?: "en" | "bn" | undefined;
 };
 
 /**

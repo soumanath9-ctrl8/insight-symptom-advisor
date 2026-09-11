@@ -55,11 +55,11 @@ type DetectRedFlagsInput = {
    */
   answers?: RedFlagAnswer[];
 
-  age?: string;
+  age?: string | undefined;
 
-  duration?: string;
+  duration?: string | undefined;
 
-  language?: "en" | "bn";
+  language?: "en" | "bn" | undefined;
 };
 
 /* -------------------------------------------------------------------------- */
