@@ -803,3 +803,617 @@ function assessmentSystemPrompt(args: {
     profileContext
       ? [
           "
+
+          "PATIENT BACKGROUND:",
+          profileContext,
+          "",
+          "IMPORTANT: Patient background is contextual information only.",
+          "Do NOT convert an existing condition, previous illness, medication, allergy, smoking history or family history into a current symptom unless the current presentation explicitly reports it.",
+        ]
+      : "",
+
+    "CURRENTLY REPORTED INFORMATION must take priority over background information.",
+
+    "RED-FLAG OVERRIDE:",
+    "The deterministic safety screen is authoritative for immediate red-flag triage.",
+    "If a critical red flag is present, urgency must remain emergency.",
+    "Do not downgrade an emergency because the AI differential looks otherwise reassuring.",
+
+    redFlagCheck.hits.length
+      ? [
+          "DETERMINISTIC SAFETY SCREEN FINDINGS:",
+          ...redFlagCheck.hits.map(
+            (hit) =>
+              `- ${hit.severity.toUpperCase()}: ${hit.message}`,
+          ),
+          `Safety level: ${redFlagCheck.level ?? "none"}`,
+        ].join("\n")
+      : "DETERMINISTIC SAFETY SCREEN: No critical or urgent rule-based finding detected.",
+
+    redFlagCheck.vitals
+      ? [
+          "PATIENT-REPORTED VITALS:",
+          describeVitals(redFlagCheck.vitals),
+        ].join("\n")
+      : "",
+
+    worseningOverride
+      ? [
+          "TRAJECTORY SIGNAL:",
+          "The patient-reported information suggests the complaint may be worsening or not improving.",
+          "Consider this when deciding whether routine self-care remains appropriate.",
+          "Do not automatically classify the case as urgent or emergency solely because it is worsening.",
+        ].join("\n")
+      : "TRAJECTORY SIGNAL: No explicit worsening signal was detected from patient-reported information.",
+
+    "SAFETY LANGUAGE:",
+    "Never present a condition as confirmed.",
+    "Never claim that the symptom assessment establishes a diagnosis.",
+    "Use language such as 'possible explanation', 'could fit', 'may be related to', or equivalent Bengali wording.",
+
+    "MEDICATION SAFETY:",
+    "Never tell the patient to stop, restart, increase, decrease or otherwise change a prescribed medicine without clinician guidance.",
+    "If medication may be relevant, recommend discussing it with the prescribing clinician or an appropriate healthcare professional.",
+
+    "SELF-CARE SAFETY:",
+    "Only recommend low-risk general supportive measures appropriate to the reported complaint.",
+    "Do not give dangerous dosing instructions.",
+    "Do not recommend prescription treatment.",
+
+    "MISSING INFORMATION:",
+    "Only list information that would materially affect interpretation or triage.",
+    "Do not manufacture missing measurements or history.",
+
+    "OUTPUT RULES:",
+    "Return ONLY valid JSON.",
+    "Do not use markdown fences.",
+    "All numeric likelihood values must be integers from 0 to 100.",
+    "Likelihood means SYMPTOM MATCH STRENGTH, not probability.",
+    "The likelihood values do not need to sum to 100.",
+
+    langLine(language),
+
+    "Required JSON shape:",
+    JSON.stringify({
+      summary: "string",
+      urgency:
+        "self-care | see-a-doctor | urgent | emergency",
+      urgencyReason: "string",
+      conditions: [
+        {
+          name: "string",
+          riskLevel: "low | moderate | high",
+          likelihood: 0,
+          explanation: "string",
+          riskRationale: "string",
+          matchingSymptoms: ["string"],
+          contributingFactors: [
+            {
+              factor: "string",
+              weight: 0,
+              effect: "string",
+            },
+          ],
+          nextSteps: "string",
+          selfCare: ["string"],
+          reliefCategories: ["string"],
+        },
+      ],
+      redFlags: ["string"],
+      generalAdvice: "string",
+      confidence: "low | moderate | high",
+      confidenceNote: "string",
+      missingInfo: ["string"],
+      nextStep: "string",
+    }),
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/* -------------------------------------------------------------------------- */
+/*                         Assessment context                                  */
+/* -------------------------------------------------------------------------- */
+
+function assessmentContext(
+  data: z.infer<typeof AssessmentInput>,
+) {
+  const answers = data.answers
+    .map(
+      (item, index) =>
+        `Follow-up ${index + 1} question: ${item.question}\nFollow-up ${index + 1} patient answer: ${item.answer}`,
+    )
+    .join("\n");
+
+  return [
+    contextBlock(data),
+    answers
+      ? `FOLLOW-UP ANSWERS:\n${answers}`
+      : "FOLLOW-UP ANSWERS: None.",
+  ].join("\n\n");
+}
+
+/* -------------------------------------------------------------------------- */
+/*                       Patient assessment context                            */
+/* -------------------------------------------------------------------------- */
+
+function patientAssessmentContext(
+  data: z.infer<typeof PatientAssessmentInput>,
+  profile: PatientProfileRow,
+) {
+  const answers = data.answers
+    .map(
+      (item, index) =>
+        `Follow-up ${index + 1} question: ${item.question}\nFollow-up ${index + 1} patient answer: ${item.answer}`,
+    )
+    .join("\n");
+
+  return [
+    "CURRENTLY REPORTED SYMPTOMS:",
+    `Initial symptom description: ${data.symptoms}`,
+    data.duration
+      ? `Duration: ${data.duration}`
+      : "",
+    data.severity
+      ? `Overall reported severity: ${data.severity}/10`
+      : "",
+    answers
+      ? `FOLLOW-UP ANSWERS:\n${answers}`
+      : "FOLLOW-UP ANSWERS: None.",
+    "",
+    buildPatientProfileContext(profile),
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/* -------------------------------------------------------------------------- */
+/*                        Assessment normalizer                                */
+/* -------------------------------------------------------------------------- */
+
+function normalizeAssessment(
+  raw: unknown,
+  language: "en" | "bn",
+): Assessment {
+  const parsed = AssessmentSchema.parse(raw);
+
+  const conditions: Condition[] = parsed.conditions
+    .slice(0, 5)
+    .map((condition) => ({
+      ...condition,
+      riskLevel: normalizeRisk(
+        condition.riskLevel,
+      ),
+      likelihood: Math.max(
+        0,
+        Math.min(
+          100,
+          Math.round(
+            Number.isFinite(condition.likelihood)
+              ? condition.likelihood
+              : 0,
+          ),
+        ),
+      ),
+      matchingSymptoms:
+        condition.matchingSymptoms.slice(0, 8),
+      contributingFactors:
+        condition.contributingFactors
+          .slice(0, 8)
+          .map((factor) => ({
+            ...factor,
+            weight: Math.max(
+              -100,
+              Math.min(
+                100,
+                Number.isFinite(factor.weight)
+                  ? factor.weight
+                  : 0,
+              ),
+            ),
+          })),
+      selfCare: condition.selfCare.slice(0, 8),
+      reliefCategories:
+        condition.reliefCategories.slice(0, 8),
+    }));
+
+  let urgency = normalizeUrgency(
+    parsed.urgency,
+  );
+
+  /*
+   * Deterministic safety rules outrank model output.
+   */
+  if (language === "bn") {
+    // no-op; language is used by the generated strings below.
+  }
+
+  return {
+    summary: parsed.summary.trim(),
+    urgency,
+    urgencyReason:
+      parsed.urgencyReason.trim(),
+    conditions,
+    redFlags: parsed.redFlags
+      .filter(Boolean)
+      .slice(0, 10),
+    generalAdvice:
+      parsed.generalAdvice.trim(),
+    confidence: normalizeConfidence(
+      parsed.confidence,
+    ),
+    confidenceNote:
+      parsed.confidenceNote.trim(),
+    missingInfo: parsed.missingInfo
+      .filter(Boolean)
+      .slice(0, 10),
+    nextStep: parsed.nextStep.trim(),
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/*                     Apply deterministic safety result                       */
+/* -------------------------------------------------------------------------- */
+
+function applySafetyOverride(
+  assessment: Assessment,
+  safety: ReturnType<typeof safetyScreen>,
+  language: "en" | "bn",
+): Assessment {
+  if (safety.level !== "critical") {
+    return assessment;
+  }
+
+  const notice = redFlagUrgencyNotice(
+    "critical",
+    language,
+  );
+
+  return {
+    ...assessment,
+    urgency: "emergency",
+    urgencyReason: notice,
+    redFlags: [
+      ...new Set([
+        ...safety.hits.map(
+          (hit) => hit.message,
+        ),
+        ...assessment.redFlags,
+      ]),
+    ].slice(0, 10),
+    generalAdvice:
+      language === "bn"
+        ? "এখনই ১১২ বা ১০৮-এ কল করুন অথবা নিকটতম আপৎকালীন বিভাগে যান। রোগীকে একা রাখবেন না।"
+        : "Call 112 or 108 now, or go to the nearest emergency department. Do not leave the person alone.",
+    nextStep:
+      language === "bn"
+        ? "এখনই ১১২ বা ১০৮-এ কল করুন অথবা নিকটতম আপৎকালীন বিভাগে যান।"
+        : "Call 112 or 108 now or go to the nearest emergency department.",
+    confidence: "high",
+    confidenceNote:
+      language === "bn"
+        ? "এই জরুরি নির্দেশটি নিয়মভিত্তিক সুরক্ষা যাচাইয়ের উপর নির্ভর করছে।"
+        : "This emergency instruction is based on a rule-based safety check.",
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/*                         Self symptom assessment                            */
+/* -------------------------------------------------------------------------- */
+
+export const assessSymptoms = createServerFn({
+  method: "POST",
+})
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    AssessmentInput.parse(input),
+  )
+  .handler(async ({ data }) => {
+    const safety = safetyScreen(data);
+
+    /*
+     * Never send an immediately critical case to the differential model.
+     */
+    if (safety.level === "critical") {
+      return immediateEmergencyAssessment(
+        data,
+      ) as Assessment;
+    }
+
+    const worsening = isWorsening(
+      data.symptoms,
+      data.answers,
+    );
+
+    const system = assessmentSystemPrompt({
+      language: data.language,
+      age: data.age,
+      sex: data.sex,
+      redFlagCheck: safety,
+      worseningOverride: worsening,
+    });
+
+    const raw = await callModel(
+      system,
+      assessmentContext(data),
+    );
+
+    let assessment =
+      normalizeAssessment(
+        raw,
+        data.language,
+      );
+
+    assessment =
+      applySafetyOverride(
+        assessment,
+        safety,
+        data.language,
+      );
+
+    /*
+     * If deterministic safety finds urgent findings, preserve urgent status.
+     * It must not automatically become emergency.
+     */
+    if (
+      safety.level === "urgent" &&
+      assessment.urgency === "self-care"
+    ) {
+      assessment = {
+        ...assessment,
+        urgency: "urgent",
+        urgencyReason:
+          data.language === "bn"
+            ? "নিয়মভিত্তিক নিরাপত্তা যাচাইয়ে দ্রুত চিকিৎসা মূল্যায়নের প্রয়োজন হতে পারে এমন একটি সতর্কতা পাওয়া গেছে।"
+            : "The rule-based safety check found a finding that may require prompt medical assessment.",
+      };
+    }
+
+    return assessment;
+  });
+
+/* -------------------------------------------------------------------------- */
+/*                     Patient symptom assessment                              */
+/* -------------------------------------------------------------------------- */
+
+export const assessPatientSymptoms =
+  createServerFn({
+    method: "POST",
+  })
+    .middleware([requireSupabaseAuth])
+    .inputValidator((input: unknown) =>
+      PatientAssessmentInput.parse(input),
+    )
+    .handler(async ({ data, context }) => {
+      const userId = context.userId;
+
+      if (!userId) {
+        throw new Error(
+          "You must be signed in to check a patient's symptoms.",
+        );
+      }
+
+      const profile =
+        await getOwnedPatientProfile(
+          context.supabase,
+          userId,
+          data.patientId,
+        );
+
+      const safetyInput: SafetyInput = {
+        symptoms: data.symptoms,
+        duration: data.duration,
+        age: profile.age ?? undefined,
+        language: data.language,
+        answers: data.answers,
+      };
+
+      const safety =
+        safetyScreen(safetyInput);
+
+      /*
+       * Critical safety cases never need an AI differential.
+       */
+      if (safety.level === "critical") {
+        return immediateEmergencyAssessment(
+          safetyInput,
+        ) as Assessment;
+      }
+
+      const worsening = isWorsening(
+        data.symptoms,
+        data.answers,
+      );
+
+      const system =
+        assessmentSystemPrompt({
+          language: data.language,
+          age: profile.age ?? undefined,
+          sex: profile.sex ?? undefined,
+          pregnancy:
+            profile.sex === "Female"
+              ? profile.pregnancy_status ??
+                undefined
+              : undefined,
+          redFlagCheck: safety,
+          worseningOverride: worsening,
+          profileContext:
+            buildPatientProfileContext(
+              profile,
+            ),
+        });
+
+      const raw = await callModel(
+        system,
+        patientAssessmentContext(
+          data,
+          profile,
+        ),
+      );
+
+      let assessment =
+        normalizeAssessment(
+          raw,
+          data.language,
+        );
+
+      assessment =
+        applySafetyOverride(
+          assessment,
+          safety,
+          data.language,
+        );
+
+      if (
+        safety.level === "urgent" &&
+        assessment.urgency === "self-care"
+      ) {
+        assessment = {
+          ...assessment,
+          urgency: "urgent",
+          urgencyReason:
+            data.language === "bn"
+              ? "নিরাপত্তা যাচাইয়ে দ্রুত চিকিৎসা মূল্যায়নের প্রয়োজন হতে পারে এমন একটি সতর্কতা পাওয়া গেছে।"
+              : "The safety check found a finding that may require prompt medical assessment.",
+        };
+      }
+
+      return assessment;
+    });
+
+/* -------------------------------------------------------------------------- */
+/*                         Clarification assessment                            */
+/* -------------------------------------------------------------------------- */
+
+export const clarifyAnswers = createServerFn({
+  method: "POST",
+})
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    AssessmentInput.parse(input),
+  )
+  .handler(async ({ data }) => {
+    const safety = safetyScreen(data);
+
+    if (safety.level === "critical") {
+      return immediateEmergencyAssessment(
+        data,
+      ) as Assessment;
+    }
+
+    const worsening = isWorsening(
+      data.symptoms,
+      data.answers,
+    );
+
+    const system = assessmentSystemPrompt({
+      language: data.language,
+      age: data.age,
+      sex: data.sex,
+      redFlagCheck: safety,
+      worseningOverride: worsening,
+    });
+
+    const raw = await callModel(
+      system,
+      [
+        "Perform the assessment again using the additional follow-up answers below.",
+        "Do not treat the follow-up questions themselves as patient symptoms.",
+        "",
+        assessmentContext(data),
+      ].join("\n"),
+    );
+
+    let assessment =
+      normalizeAssessment(
+        raw,
+        data.language,
+      );
+
+    assessment =
+      applySafetyOverride(
+        assessment,
+        safety,
+        data.language,
+      );
+
+    if (
+      safety.level === "urgent" &&
+      assessment.urgency === "self-care"
+    ) {
+      assessment = {
+        ...assessment,
+        urgency: "urgent",
+        urgencyReason:
+          data.language === "bn"
+            ? "নিরাপত্তা যাচাইয়ে দ্রুত চিকিৎসা মূল্যায়নের প্রয়োজন হতে পারে এমন একটি সতর্কতা পাওয়া গেছে।"
+            : "The safety check found a finding that may require prompt medical assessment.",
+      };
+    }
+
+    return assessment;
+  });
+
+/* -------------------------------------------------------------------------- */
+/*                       Patient history carry-over                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Complaint-aware worsening helper.
+ *
+ * A previous check should only influence the current assessment when there
+ * is meaningful overlap between the current complaint and the previous
+ * complaint. The old broad rule:
+ *
+ *   trajectoryWorse && previous.length > 0
+ *
+ * incorrectly escalated any worsening complaint merely because the user had
+ * any historical check.
+ *
+ * This helper is intentionally conservative.
+ */
+export function hasComplaintCarryover(
+  currentSymptoms: string,
+  previousSymptoms: string[],
+) {
+  const currentWords = new Set(
+    currentSymptoms
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
+      .split(/\s+/)
+      .filter((word) => word.length >= 4),
+  );
+
+  if (currentWords.size === 0) {
+    return false;
+  }
+
+  return previousSymptoms.some(
+    (previous) => {
+      const previousWords =
+        previous
+          .toLowerCase()
+          .replace(/[^\p{L}\p{N}\s]/gu, " ")
+          .split(/\s+/)
+          .filter(
+            (word) => word.length >= 4,
+          );
+
+      const overlap =
+        previousWords.filter((word) =>
+          currentWords.has(word),
+        ).length;
+
+      return overlap >= 1;
+    },
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                               Exports                                       */
+/* -------------------------------------------------------------------------- */
+
+export type {
+  RedFlagResult,
+  Vitals,
+};
