@@ -54,7 +54,7 @@ import { Separator } from "@/components/ui/separator";
  */
 
 export const Route = createFileRoute(
-  "/_authenticated/patient-history/$patientId",
+  "/_authenticated/patient-checker/$patient_ID",
 )({
   ssr: false,
 
@@ -65,14 +65,14 @@ export const Route = createFileRoute(
      * If somebody opens the route without a patient ID,
      * send them back to the patient list.
      */
-    if (!params.patientId) {
+    if (!params.patient_ID) {
       throw redirect({
         to: "/patients",
       });
     }
 
     return {
-      patientId: params.patientId,
+      patientId: params.patient_ID,
     };
   },
 
@@ -86,7 +86,7 @@ export const Route = createFileRoute(
  */
 
 function PatientHistoryPage() {
-  const { patientId } = Route.useParams();
+  const { patient_ID: patientId } = Route.useParams();
 
   const queryClient = useQueryClient();
 
@@ -339,9 +339,9 @@ function PatientHistoryPage() {
         <div className="mx-auto max-w-4xl px-5 py-10 sm:py-16">
           <Button asChild variant="ghost" size="sm">
             <Link
-              to="/patient-checker/$patientId"
+              to="/patient-checker/$patient_ID"
               params={{
-                patientId,
+                patient_ID: patientId,
               }}
             >
               <ArrowLeft className="mr-2 size-4" />
@@ -397,9 +397,9 @@ function PatientHistoryPage() {
 
         <Button asChild variant="ghost" size="sm">
           <Link
-            to="/patient-checker/$patientId"
+            to="/patient-checker/$patient_ID"
             params={{
-              patientId,
+              patient_ID: patientId,
             }}
           >
             <ArrowLeft className="mr-2 size-4" />
@@ -481,9 +481,9 @@ function PatientHistoryPage() {
 
               <Button asChild className="mt-6">
                 <Link
-                  to="/patient-checker/$patientId"
+                  to="/patient-checker/$patient_ID"
                   params={{
-                    patientId,
+                    patient_ID: patientId,
                   }}
                 >
                   Start Patient Symptom Check
@@ -699,9 +699,9 @@ function PatientHistoryPage() {
             className="flex-1"
           >
             <Link
-              to="/patient-checker/$patientId"
+              to="/patient-checker/$patient_ID"
               params={{
-                patientId,
+                patient_ID: patientId,
               }}
             >
               Check {patient.name}'s Symptoms
