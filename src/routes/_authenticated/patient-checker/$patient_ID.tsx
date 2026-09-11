@@ -40,17 +40,11 @@ import {
   type FollowUpQuestion,
 } from "@/lib/symptoms.functions";
 
-import {
-  getPatient,
-} from "@/lib/profile.functions";
+import { getPatient } from "@/lib/profile.functions";
 
-import {
-  saveCheck,
-} from "@/lib/history.functions";
+import { saveCheck } from "@/lib/history.functions";
 
-import {
-  extractVitals,
-} from "@/lib/vitals";
+import { extractVitals } from "@/lib/vitals";
 
 import { useLang } from "@/lib/i18n";
 
@@ -127,26 +121,39 @@ type Answer = {
 /* -------------------------------------------------------------------------- */
 
 function clampMatchStrength(value: number) {
-  if (!Number.isFinite(value)) return 0;
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
 
   return Math.max(
     0,
-    Math.min(100, Math.round(value)),
+    Math.min(
+      100,
+      Math.round(value),
+    ),
   );
 }
 
 function topCondition(
   assessment: Assessment | null,
 ) {
-  if (!assessment?.conditions?.length) {
+  if (
+    !assessment?.conditions?.length
+  ) {
     return null;
   }
 
-  return [...assessment.conditions].sort(
-    (a, b) =>
-      clampMatchStrength(b.likelihood) -
-      clampMatchStrength(a.likelihood),
-  )[0] ?? null;
+  return (
+    [...assessment.conditions].sort(
+      (a, b) =>
+        clampMatchStrength(
+          b.likelihood,
+        ) -
+        clampMatchStrength(
+          a.likelihood,
+        ),
+    )[0] ?? null
+  );
 }
 
 function formatUrgency(
@@ -188,7 +195,8 @@ function urgencyClass(
 function riskClass(
   risk: string,
 ) {
-  const value = risk.toLowerCase();
+  const value =
+    risk.toLowerCase();
 
   if (
     value.includes("high") ||
@@ -213,16 +221,17 @@ function riskClass(
 /* -------------------------------------------------------------------------- */
 
 function PatientSymptomCheckerPage() {
-  const { patient_ID: patientId } =
-    Route.useParams();
+  const {
+    patient_ID: patientId,
+  } = Route.useParams();
 
-  const queryClient = useQueryClient();
+  const queryClient =
+    useQueryClient();
 
-  /*
-   * Keep the existing language system.
-   *
-   * The actual symptom functions accept "en" | "bn".
-   */
+  /* ---------------------------------------------------------------------- */
+  /*                              LANGUAGE                                  */
+  /* ---------------------------------------------------------------------- */
+
   const langState = useLang() as {
     lang?: "en" | "bn";
     language?: "en" | "bn";
@@ -234,50 +243,60 @@ function PatientSymptomCheckerPage() {
     "en";
 
   /* ---------------------------------------------------------------------- */
-  /*                              SERVER FUNCTIONS                           */
+  /*                         SERVER FUNCTIONS                                */
   /* ---------------------------------------------------------------------- */
 
   const getPatientFn =
     useServerFn(getPatient);
 
   const questionsFn =
-    useServerFn(getPatientFollowUpQuestions);
+    useServerFn(
+      getPatientFollowUpQuestions,
+    );
 
   const immediateAssessmentFn =
-    useServerFn(immediateEmergencyAssessment);
+    useServerFn(
+      immediateEmergencyAssessment,
+    );
 
   const assessmentFn =
-    useServerFn(assessPatientSymptoms);
+    useServerFn(
+      assessPatientSymptoms,
+    );
 
   const saveCheckFn =
     useServerFn(saveCheck);
 
   /* ---------------------------------------------------------------------- */
-  /*                               PATIENT QUERY                             */
+  /*                              PATIENT QUERY                              */
   /* ---------------------------------------------------------------------- */
 
-  const patientQuery = useQuery({
-    queryKey: [
-      "patient",
-      patientId,
-    ],
+  const patientQuery =
+    useQuery({
+      queryKey: [
+        "patient",
+        patientId,
+      ],
 
-    queryFn: () =>
-      getPatientFn({
-        data: {
-          id: patientId,
-        },
-      }),
-  });
+      queryFn: () =>
+        getPatientFn({
+          data: {
+            id: patientId,
+          },
+        }),
+    });
 
-  const patient = patientQuery.data;
+  const patient =
+    patientQuery.data;
 
   /* ---------------------------------------------------------------------- */
   /*                                  STATE                                  */
   /* ---------------------------------------------------------------------- */
 
   const [stage, setStage] =
-    useState<Stage>("intake");
+    useState<Stage>(
+      "intake",
+    );
 
   const [symptoms, setSymptoms] =
     useState("");
@@ -286,48 +305,66 @@ function PatientSymptomCheckerPage() {
     useState("");
 
   const [questions, setQuestions] =
-    useState<FollowUpQuestion[]>([]);
+    useState<
+      FollowUpQuestion[]
+    >([]);
 
   const [answers, setAnswers] =
     useState<Answer[]>([]);
 
-  const [currentAnswer, setCurrentAnswer] =
-    useState("");
+  const [
+    currentAnswer,
+    setCurrentAnswer,
+  ] = useState("");
 
   const [step, setStep] =
     useState(0);
 
-  const [assessment, setAssessment] =
-    useState<Assessment | null>(null);
+  const [
+    assessment,
+    setAssessment,
+  ] =
+    useState<Assessment | null>(
+      null,
+    );
 
   const [savedId, setSavedId] =
-    useState<string | null>(null);
+    useState<string | null>(
+      null,
+    );
 
   const [saveError, setSaveError] =
-    useState<string | null>(null);
+    useState<string | null>(
+      null,
+    );
 
   const [formError, setFormError] =
-    useState<string | null>(null);
+    useState<string | null>(
+      null,
+    );
 
   /* ---------------------------------------------------------------------- */
   /*                         BASE PATIENT INPUT                              */
   /* ---------------------------------------------------------------------- */
 
-  const baseInput = useMemo(
-    () => ({
-      patientId,
-      symptoms: symptoms.trim(),
-      duration:
-        duration.trim() || undefined,
-      language,
-    }),
-    [
-      patientId,
-      symptoms,
-      duration,
-      language,
-    ],
-  );
+  const baseInput =
+    useMemo(
+      () => ({
+        patientId,
+        symptoms:
+          symptoms.trim(),
+        duration:
+          duration.trim() ||
+          undefined,
+        language,
+      }),
+      [
+        patientId,
+        symptoms,
+        duration,
+        language,
+      ],
+    );
 
   /* ---------------------------------------------------------------------- */
   /*                         CURRENT QUESTION                                */
@@ -349,10 +386,22 @@ function PatientSymptomCheckerPage() {
   /*                         IMMEDIATE SAFETY                                */
   /* ---------------------------------------------------------------------- */
 
+  /*
+   * IMPORTANT:
+   *
+   * immediateEmergencyAssessment() is the generic
+   * immediate safety screen.
+   *
+   * It must NOT receive patientId because patientId
+   * is not part of the generic ContextInput schema.
+   *
+   * Patient-specific background is handled by the
+   * patient assessment functions on the server.
+   */
+
   const immediateMutation =
     useMutation({
       mutationFn: (input: {
-        patientId: string;
         symptoms: string;
         duration?: string;
         language: "en" | "bn";
@@ -389,13 +438,25 @@ function PatientSymptomCheckerPage() {
         assessmentFn({
           data: {
             ...baseInput,
-            answers: input.answers,
+            answers:
+              input.answers,
           },
         }),
 
-      onSuccess: (result) => {
-        setAssessment(result);
-        setStage("result");
+      onSuccess: (
+        result,
+      ) => {
+        setAssessment(
+          result,
+        );
+
+        setStage(
+          "result",
+        );
+
+        setFormError(
+          null,
+        );
       },
     });
 
@@ -409,30 +470,35 @@ function PatientSymptomCheckerPage() {
         result: Assessment,
       ) => {
         const top =
-          topCondition(result);
+          topCondition(
+            result,
+          );
 
         const answerPairs =
-          answers.map((item) => ({
-            question: item.question,
-            answer: item.answer,
-          }));
+          answers.map(
+            (item) => ({
+              question:
+                item.question,
+              answer:
+                item.answer,
+            }),
+          );
 
         /*
          * IMPORTANT:
          *
-         * Vitals are extracted only from:
-         * - patient's current symptoms
-         * - duration
-         * - patient's actual answers
+         * Only patient-reported information is passed
+         * to extractVitals().
          *
-         * Question text itself is NOT passed to the vital extractor.
+         * Question text is deliberately excluded.
          */
         const patientReportedText =
           [
             symptoms,
             duration,
             ...answerPairs.map(
-              (item) => item.answer,
+              (item) =>
+                item.answer,
             ),
           ]
             .filter(Boolean)
@@ -443,19 +509,30 @@ function PatientSymptomCheckerPage() {
             patientReportedText,
           );
 
+        /*
+         * IMPORTANT:
+         *
+         * The current history SaveCheck schema expects
+         * severity in the 1–10 range.
+         *
+         * Therefore we DO NOT put the 0–100 symptom
+         * match strength into severity here.
+         *
+         * Match strength remains part of the assessment
+         * and is displayed as a percentage.
+         *
+         * Use a safe default of 1 for the history field.
+         */
         return saveCheckFn({
           data: {
             symptoms:
               symptoms.trim(),
 
             duration:
-              duration.trim() || null,
+              duration.trim() ||
+              null,
 
-            severity: top
-              ? clampMatchStrength(
-                  top.likelihood,
-                )
-              : 0,
+            severity: 1,
 
             urgency:
               result.urgency,
@@ -483,30 +560,34 @@ function PatientSymptomCheckerPage() {
         });
       },
 
-      onSuccess: (saved) => {
+      onSuccess: (
+        saved,
+      ) => {
         /*
-         * IMPORTANT:
-         *
-         * Never set a fake "saved" value.
-         * Use the actual database record ID returned
-         * by saveCheck().
+         * Always use the actual database ID.
          */
         setSavedId(
           saved?.id ??
             null,
         );
 
-        setSaveError(null);
+        setSaveError(
+          null,
+        );
 
-        queryClient.invalidateQueries({
-          queryKey: [
-            "patient-checks",
-            patientId,
-          ],
-        });
+        queryClient.invalidateQueries(
+          {
+            queryKey: [
+              "patient-checks",
+              patientId,
+            ],
+          },
+        );
       },
 
-      onError: (error) => {
+      onError: (
+        error,
+      ) => {
         setSaveError(
           error instanceof Error
             ? error.message
@@ -520,15 +601,21 @@ function PatientSymptomCheckerPage() {
   /* ---------------------------------------------------------------------- */
 
   async function startCheck() {
-    setFormError(null);
+    setFormError(
+      null,
+    );
 
     const cleanSymptoms =
       symptoms.trim();
 
-    if (cleanSymptoms.length < 3) {
+    if (
+      cleanSymptoms.length <
+      3
+    ) {
       setFormError(
         "Please describe at least one symptom before continuing.",
       );
+
       return;
     }
 
@@ -536,29 +623,34 @@ function PatientSymptomCheckerPage() {
       setFormError(
         "Patient profile could not be loaded.",
       );
+
       return;
     }
 
     /*
-     * First perform the immediate safety check.
+     * First perform immediate safety screening.
+     *
+     * No question text is included.
      */
     try {
       const emergencyResult =
-        await immediateMutation.mutateAsync({
-          patientId,
-          symptoms:
-            cleanSymptoms,
-          duration:
-            duration.trim() ||
-            undefined,
-          language,
-        });
+        await immediateMutation.mutateAsync(
+          {
+            symptoms:
+              cleanSymptoms,
+
+            duration:
+              duration.trim() ||
+              undefined,
+
+            language,
+          },
+        );
 
       /*
-       * Only "emergency" is treated as emergency.
+       * ONLY "emergency" is emergency.
        *
-       * "urgent" is NOT automatically treated
-       * as emergency.
+       * "urgent" remains a separate urgency level.
        */
       if (
         emergencyResult?.urgency ===
@@ -568,22 +660,24 @@ function PatientSymptomCheckerPage() {
           emergencyResult,
         );
 
-        setStage("result");
+        setStage(
+          "result",
+        );
 
         return;
       }
     } catch {
       /*
-       * If the immediate safety request fails,
-       * the normal assessment request below can still
-       * provide the application error state.
+       * The immediate safety screen must not prevent
+       * the patient-specific assessment from running
+       * if the separate safety request fails.
        */
     }
 
-    /*
-     * Now get adaptive questions specific to this
-     * patient's profile and current complaint.
-     */
+    /* ------------------------------------------------------------------ */
+    /*                       ADAPTIVE QUESTIONS                            */
+    /* ------------------------------------------------------------------ */
+
     try {
       const result =
         await questionsMutation.mutateAsync();
@@ -593,27 +687,39 @@ function PatientSymptomCheckerPage() {
         [];
 
       if (
-        nextQuestions.length === 0
+        nextQuestions.length ===
+        0
       ) {
-        await assessmentMutation.mutateAsync({
-          answers: [],
-        });
+        await assessmentMutation.mutateAsync(
+          {
+            answers: [],
+          },
+        );
 
         return;
       }
 
       setQuestions(
-        nextQuestions.slice(0, 6),
+        nextQuestions.slice(
+          0,
+          6,
+        ),
       );
 
       setAnswers([]);
 
-      setCurrentAnswer("");
+      setCurrentAnswer(
+        "",
+      );
 
       setStep(0);
 
-      setStage("questions");
-    } catch (error) {
+      setStage(
+        "questions",
+      );
+    } catch (
+      error,
+    ) {
       setFormError(
         error instanceof Error
           ? error.message
@@ -627,53 +733,63 @@ function PatientSymptomCheckerPage() {
   /* ---------------------------------------------------------------------- */
 
   async function submitAnswer() {
-    if (!currentQuestion) {
+    if (
+      !currentQuestion
+    ) {
       return;
     }
 
     const cleanAnswer =
       currentAnswer.trim();
 
-    if (!cleanAnswer) {
+    if (
+      !cleanAnswer
+    ) {
       setFormError(
         "Please answer the question before continuing.",
       );
+
       return;
     }
 
-    setFormError(null);
+    setFormError(
+      null,
+    );
 
-    const nextAnswers = [
-      ...answers,
-      {
-        question:
-          currentQuestion.question,
-        answer:
-          cleanAnswer,
-      },
-    ];
+    const nextAnswers =
+      [
+        ...answers,
+        {
+          question:
+            currentQuestion.question,
+          answer:
+            cleanAnswer,
+        },
+      ];
 
     /*
-     * Run the immediate safety screen against
-     * patient answers.
+     * Immediate safety screen.
+     *
+     * Only the symptom text + patient's actual answer
+     * are sent.
      */
     try {
       const safetyResult =
-        await immediateMutation.mutateAsync({
-          patientId,
+        await immediateMutation.mutateAsync(
+          {
+            symptoms:
+              symptoms.trim(),
 
-          symptoms:
-            symptoms.trim(),
+            duration:
+              duration.trim() ||
+              undefined,
 
-          duration:
-            duration.trim() ||
-            undefined,
+            language,
 
-          language,
-
-          answers:
-            nextAnswers,
-        });
+            answers:
+              nextAnswers,
+          },
+        );
 
       if (
         safetyResult?.urgency ===
@@ -687,20 +803,23 @@ function PatientSymptomCheckerPage() {
           safetyResult,
         );
 
-        setStage("result");
+        setStage(
+          "result",
+        );
 
         return;
       }
     } catch {
       /*
-       * Do not block the normal assessment merely
-       * because the separate safety call failed.
+       * Continue to the normal patient assessment
+       * if the separate safety request fails.
        */
     }
 
-    /*
-     * More questions remain.
-     */
+    /* ------------------------------------------------------------------ */
+    /*                       MORE QUESTIONS                               */
+    /* ------------------------------------------------------------------ */
+
     if (
       step <
       questions.length - 1
@@ -714,25 +833,31 @@ function PatientSymptomCheckerPage() {
           value + 1,
       );
 
-      setCurrentAnswer("");
+      setCurrentAnswer(
+        "",
+      );
 
       return;
     }
 
-    /*
-     * Final question completed:
-     * perform the full patient assessment.
-     */
+    /* ------------------------------------------------------------------ */
+    /*                       FINAL ASSESSMENT                              */
+    /* ------------------------------------------------------------------ */
+
     setAnswers(
       nextAnswers,
     );
 
     try {
-      await assessmentMutation.mutateAsync({
-        answers:
-          nextAnswers,
-      });
-    } catch (error) {
+      await assessmentMutation.mutateAsync(
+        {
+          answers:
+            nextAnswers,
+        },
+      );
+    } catch (
+      error,
+    ) {
       setFormError(
         error instanceof Error
           ? error.message
@@ -764,7 +889,9 @@ function PatientSymptomCheckerPage() {
   /* ---------------------------------------------------------------------- */
 
   function resetCheck() {
-    setStage("intake");
+    setStage(
+      "intake",
+    );
 
     setSymptoms("");
 
@@ -774,17 +901,27 @@ function PatientSymptomCheckerPage() {
 
     setAnswers([]);
 
-    setCurrentAnswer("");
+    setCurrentAnswer(
+      "",
+    );
 
     setStep(0);
 
-    setAssessment(null);
+    setAssessment(
+      null,
+    );
 
-    setSavedId(null);
+    setSavedId(
+      null,
+    );
 
-    setSaveError(null);
+    setSaveError(
+      null,
+    );
 
-    setFormError(null);
+    setFormError(
+      null,
+    );
   }
 
   /* ---------------------------------------------------------------------- */
@@ -844,9 +981,10 @@ function PatientSymptomCheckerPage() {
               </CardTitle>
 
               <CardDescription>
-                This patient may have been
-                deleted or may not belong to
-                your account.
+                This patient may have
+                been deleted or may
+                not belong to your
+                account.
               </CardDescription>
             </CardHeader>
 
@@ -892,7 +1030,8 @@ function PatientSymptomCheckerPage() {
             >
               <ArrowLeft className="mr-2 size-4" />
 
-              Back to {patient.name}'s History
+              Back to{" "}
+              {patient.name}'s History
             </Link>
           </Button>
         </div>
@@ -927,7 +1066,7 @@ function PatientSymptomCheckerPage() {
         </section>
 
         {/* ---------------------------------------------------------------- */}
-        {/* PATIENT SEPARATION NOTICE                                         */}
+        {/* SEPARATION NOTICE                                                 */}
         {/* ---------------------------------------------------------------- */}
 
         <div className="rounded-xl border bg-muted/40 px-4 py-3">
@@ -935,14 +1074,17 @@ function PatientSymptomCheckerPage() {
             <Info className="mt-0.5 size-4 shrink-0 text-primary" />
 
             <p className="text-sm leading-6 text-muted-foreground">
-              This symptom check is being
-              performed specifically for{" "}
+              This symptom check is
+              being performed
+              specifically for{" "}
               <span className="font-medium text-foreground">
                 {patient.name}
               </span>
-              . Their profile and symptom
-              history are kept separate from
-              your own self-check history.
+              . Their profile and
+              symptom history are
+              kept separate from
+              your own self-check
+              history.
             </p>
           </div>
         </div>
@@ -951,7 +1093,8 @@ function PatientSymptomCheckerPage() {
         {/* PROGRESS                                                          */}
         {/* ---------------------------------------------------------------- */}
 
-        {stage === "questions" && (
+        {stage ===
+          "questions" && (
           <Card>
             <CardContent className="pt-6">
               <div className="flex items-center justify-between gap-4 text-sm">
@@ -1000,7 +1143,8 @@ function PatientSymptomCheckerPage() {
         {/*                            INTAKE                                  */}
         {/* ================================================================= */}
 
-        {stage === "intake" && (
+        {stage ===
+          "intake" && (
           <Card className="overflow-hidden">
             <CardHeader>
               <div className="flex items-center gap-3">
@@ -1010,12 +1154,16 @@ function PatientSymptomCheckerPage() {
 
                 <div>
                   <CardTitle>
-                    Check {patient.name}'s symptoms
+                    Check{" "}
+                    {patient.name}'s
+                    symptoms
                   </CardTitle>
 
                   <CardDescription>
-                    Describe the current problem
-                    as clearly as possible.
+                    Describe the
+                    current problem
+                    as clearly as
+                    possible.
                   </CardDescription>
                 </div>
               </div>
@@ -1024,7 +1172,7 @@ function PatientSymptomCheckerPage() {
             <CardContent className="space-y-6">
 
               {/* ---------------------------------------------------------- */}
-              {/* PROFILE SNAPSHOT                                             */}
+              {/* PATIENT INFORMATION                                         */}
               {/* ---------------------------------------------------------- */}
 
               <div className="rounded-xl border bg-muted/30 p-4">
@@ -1097,15 +1245,21 @@ function PatientSymptomCheckerPage() {
               <div className="space-y-2">
                 <Label htmlFor="patient-symptoms">
                   What symptoms is{" "}
-                  {patient.name} experiencing?
+                  {patient.name}{" "}
+                  experiencing?
                 </Label>
 
                 <Textarea
                   id="patient-symptoms"
-                  value={symptoms}
-                  onChange={(event) =>
+                  value={
+                    symptoms
+                  }
+                  onChange={(
+                    event,
+                  ) =>
                     setSymptoms(
-                      event.target.value,
+                      event.target
+                        .value,
                     )
                   }
                   placeholder="For example: fever, sore throat, cough, headache…"
@@ -1120,13 +1274,19 @@ function PatientSymptomCheckerPage() {
 
                 <div className="flex justify-between gap-3 text-xs text-muted-foreground">
                   <span>
-                    Include the main symptoms,
-                    where they occur, and
-                    anything that feels unusual.
+                    Include the
+                    main symptoms,
+                    where they
+                    occur, and
+                    anything that
+                    feels unusual.
                   </span>
 
                   <span className="shrink-0">
-                    {symptoms.length}/2000
+                    {
+                      symptoms.length
+                    }
+                    /2000
                   </span>
                 </div>
               </div>
@@ -1137,15 +1297,22 @@ function PatientSymptomCheckerPage() {
 
               <div className="space-y-2">
                 <Label htmlFor="patient-duration">
-                  How long has this been happening?
+                  How long has
+                  this been
+                  happening?
                 </Label>
 
                 <Input
                   id="patient-duration"
-                  value={duration}
-                  onChange={(event) =>
+                  value={
+                    duration
+                  }
+                  onChange={(
+                    event,
+                  ) =>
                     setDuration(
-                      event.target.value,
+                      event.target
+                        .value,
                     )
                   }
                   placeholder="For example: 2 days, since yesterday, 3 weeks…"
@@ -1158,8 +1325,10 @@ function PatientSymptomCheckerPage() {
                 />
 
                 <p className="text-xs text-muted-foreground">
-                  A duration helps the assessment
-                  understand how the symptoms have
+                  A duration helps
+                  the assessment
+                  understand how
+                  the symptoms have
                   developed.
                 </p>
               </div>
@@ -1174,19 +1343,30 @@ function PatientSymptomCheckerPage() {
 
                   <div className="space-y-1">
                     <p className="text-sm font-medium">
-                      Patient profile is used as
-                      background context
+                      Patient profile
+                      is used as
+                      background
+                      context
                     </p>
 
                     <p className="text-xs leading-5 text-muted-foreground">
-                      Existing conditions,
-                      medicines, allergies,
-                      previous illnesses,
-                      smoking history and
-                      family history help
-                      contextualize the assessment.
-                      They are not automatically
-                      treated as current symptoms.
+                      Existing
+                      conditions,
+                      medicines,
+                      allergies,
+                      previous
+                      illnesses,
+                      smoking
+                      history and
+                      family history
+                      help
+                      contextualize
+                      the assessment.
+                      They are not
+                      automatically
+                      treated as
+                      current
+                      symptoms.
                     </p>
                   </div>
                 </div>
@@ -1199,7 +1379,9 @@ function PatientSymptomCheckerPage() {
               <Button
                 className="w-full"
                 size="lg"
-                onClick={startCheck}
+                onClick={
+                  startCheck
+                }
                 disabled={
                   immediateMutation.isPending ||
                   questionsMutation.isPending ||
@@ -1211,22 +1393,27 @@ function PatientSymptomCheckerPage() {
                   <>
                     <Loader2 className="mr-2 size-4 animate-spin" />
 
-                    Preparing symptom check…
+                    Preparing
+                    symptom
+                    check…
                   </>
                 ) : (
                   <>
                     <HeartPulse className="mr-2 size-4" />
 
-                    Start Symptom Check
+                    Start Symptom
+                    Check
                   </>
                 )}
               </Button>
 
               <p className="text-center text-xs leading-5 text-muted-foreground">
-                This tool provides symptom
-                assessment and care guidance. It
-                does not provide a definitive
-                medical diagnosis.
+                This tool provides
+                symptom assessment
+                and care guidance.
+                It does not provide
+                a definitive medical
+                diagnosis.
               </p>
             </CardContent>
           </Card>
@@ -1236,7 +1423,8 @@ function PatientSymptomCheckerPage() {
         {/*                           QUESTIONS                                */}
         {/* ================================================================= */}
 
-        {stage === "questions" &&
+        {stage ===
+          "questions" &&
           currentQuestion && (
             <Card className="overflow-hidden">
               <CardHeader>
@@ -1247,12 +1435,18 @@ function PatientSymptomCheckerPage() {
 
                   <div>
                     <CardTitle>
-                      A few more questions
+                      A few more
+                      questions
                     </CardTitle>
 
                     <CardDescription>
-                      These questions are selected
-                      for {patient.name}'s current
+                      These
+                      questions are
+                      selected for{" "}
+                      {
+                        patient.name
+                      }
+                      's current
                       symptoms.
                     </CardDescription>
                   </div>
@@ -1267,12 +1461,16 @@ function PatientSymptomCheckerPage() {
 
                 <div className="rounded-xl border bg-muted/30 p-5">
                   <p className="text-lg font-medium leading-7">
-                    {currentQuestion.question}
+                    {
+                      currentQuestion.question
+                    }
                   </p>
 
                   {currentQuestion.why && (
                     <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                      {currentQuestion.why}
+                      {
+                        currentQuestion.why
+                      }
                     </p>
                   )}
                 </div>
@@ -1282,7 +1480,9 @@ function PatientSymptomCheckerPage() {
                 {/* -------------------------------------------------------- */}
 
                 {currentQuestion.options &&
-                currentQuestion.options.length >
+                currentQuestion
+                  .options
+                  .length >
                   0 ? (
                   <div
                     className="grid gap-3"
@@ -1290,14 +1490,18 @@ function PatientSymptomCheckerPage() {
                     aria-label="Answer options"
                   >
                     {currentQuestion.options.map(
-                      (option) => {
+                      (
+                        option,
+                      ) => {
                         const selected =
                           currentAnswer ===
                           option;
 
                         return (
                           <button
-                            key={option}
+                            key={
+                              option
+                            }
                             type="button"
                             onClick={() =>
                               setCurrentAnswer(
@@ -1310,7 +1514,9 @@ function PatientSymptomCheckerPage() {
                               selected
                                 ? "border-primary bg-primary/10 text-foreground shadow-sm"
                                 : "bg-card",
-                            ].join(" ")}
+                            ].join(
+                              " ",
+                            )}
                             role="radio"
                             aria-checked={
                               selected
@@ -1323,7 +1529,9 @@ function PatientSymptomCheckerPage() {
                                   selected
                                     ? "border-primary"
                                     : "border-muted-foreground/40",
-                                ].join(" ")}
+                                ].join(
+                                  " ",
+                                )}
                               >
                                 {selected && (
                                   <div className="size-2.5 rounded-full bg-primary" />
@@ -1331,7 +1539,9 @@ function PatientSymptomCheckerPage() {
                               </div>
 
                               <span>
-                                {option}
+                                {
+                                  option
+                                }
                               </span>
                             </div>
                           </button>
@@ -1342,7 +1552,7 @@ function PatientSymptomCheckerPage() {
                 ) : (
                   <div className="space-y-2">
                     <Label htmlFor="patient-answer">
-                      Your answer
+                      Patient's answer
                     </Label>
 
                     <Textarea
@@ -1350,9 +1560,12 @@ function PatientSymptomCheckerPage() {
                       value={
                         currentAnswer
                       }
-                      onChange={(event) =>
+                      onChange={(
+                        event,
+                      ) =>
                         setCurrentAnswer(
-                          event.target.value,
+                          event.target
+                            .value,
                         )
                       }
                       placeholder="Type the patient's answer…"
@@ -1370,20 +1583,29 @@ function PatientSymptomCheckerPage() {
                   <Button
                     variant="ghost"
                     onClick={() => {
-                      if (step === 0) {
+                      if (
+                        step ===
+                        0
+                      ) {
                         setStage(
                           "intake",
                         );
+
                         return;
                       }
 
                       setStep(
-                        (value) =>
-                          value - 1,
+                        (
+                          value,
+                        ) =>
+                          value -
+                          1,
                       );
 
                       setAnswers(
-                        (current) =>
+                        (
+                          current,
+                        ) =>
                           current.slice(
                             0,
                             -1,
@@ -1417,9 +1639,11 @@ function PatientSymptomCheckerPage() {
                         Checking…
                       </>
                     ) : step <
-                      questions.length - 1 ? (
+                      questions.length -
+                        1 ? (
                       <>
-                        Next question
+                        Next
+                        question
 
                         <ChevronRight className="ml-2 size-4" />
                       </>
@@ -1427,17 +1651,22 @@ function PatientSymptomCheckerPage() {
                       <>
                         <Stethoscope className="mr-2 size-4" />
 
-                        View Assessment
+                        View
+                        Assessment
                       </>
                     )}
                   </Button>
                 </div>
 
                 <p className="text-center text-xs text-muted-foreground">
-                  Only the patient's actual
-                  answer is used as patient-reported
-                  information. The question itself
-                  is not treated as a symptom.
+                  Only the
+                  patient's actual
+                  answer is used as
+                  patient-reported
+                  information. The
+                  question itself is
+                  not treated as a
+                  symptom.
                 </p>
               </CardContent>
             </Card>
@@ -1447,9 +1676,13 @@ function PatientSymptomCheckerPage() {
         {/*                              RESULT                                */}
         {/* ================================================================= */}
 
-        {stage === "result" &&
+        {stage ===
+          "result" &&
           assessment && (
             <PatientAssessmentResult
+              patientId={
+                patientId
+              }
               patientName={
                 patient.name
               }
@@ -1508,6 +1741,7 @@ function ProfileValue({
 /* -------------------------------------------------------------------------- */
 
 function PatientAssessmentResult({
+  patientId,
   patientName,
   assessment,
   savedId,
@@ -1516,6 +1750,7 @@ function PatientAssessmentResult({
   onSave,
   onNewCheck,
 }: {
+  patientId: string;
   patientName: string;
   assessment: Assessment;
   savedId: string | null;
@@ -1525,7 +1760,9 @@ function PatientAssessmentResult({
   onNewCheck: () => void;
 }) {
   const top =
-    topCondition(assessment);
+    topCondition(
+      assessment,
+    );
 
   const isEmergency =
     assessment.urgency ===
@@ -1558,7 +1795,9 @@ function PatientAssessmentResult({
                   isEmergency
                     ? "bg-destructive/10 text-destructive"
                     : "bg-primary/10 text-primary",
-                ].join(" ")}
+                ].join(
+                  " ",
+                )}
               >
                 {isEmergency ? (
                   <ShieldAlert className="size-6" />
@@ -1569,16 +1808,21 @@ function PatientAssessmentResult({
 
               <div>
                 <p className="text-sm text-muted-foreground">
-                  Symptom assessment for
+                  Symptom assessment
+                  for
                 </p>
 
                 <CardTitle className="mt-1">
-                  {patientName}
+                  {
+                    patientName
+                  }
                 </CardTitle>
 
                 <CardDescription className="mt-1">
-                  Review the information below
-                  and use the care guidance as
+                  Review the
+                  information below
+                  and use the care
+                  guidance as
                   decision support.
                 </CardDescription>
               </div>
@@ -1590,7 +1834,9 @@ function PatientAssessmentResult({
                 urgencyClass(
                   assessment.urgency,
                 ),
-              ].join(" ")}
+              ].join(
+                " ",
+              )}
               variant="outline"
             >
               {formatUrgency(
@@ -1614,15 +1860,19 @@ function PatientAssessmentResult({
               <ShieldAlert className="size-4" />
 
               <AlertTitle>
-                Emergency care may be needed
+                Emergency care may
+                be needed
               </AlertTitle>
 
               <AlertDescription className="leading-6">
-                The safety screening found
-                information that warrants
-                emergency attention. Please seek
-                emergency medical care now rather
-                than relying on this assessment.
+                The safety screening
+                found information
+                that warrants
+                emergency attention.
+                Please seek emergency
+                medical care now
+                rather than relying on
+                this assessment.
               </AlertDescription>
             </Alert>
           )}
@@ -1637,15 +1887,19 @@ function PatientAssessmentResult({
                 <AlertTriangle className="size-4 text-orange-300" />
 
                 <AlertTitle>
-                  Prompt medical attention
+                  Prompt medical
+                  attention
                 </AlertTitle>
 
                 <AlertDescription className="leading-6">
-                  The available information
-                  suggests that prompt medical
-                  evaluation may be appropriate.
-                  This is different from an
-                  emergency classification.
+                  The available
+                  information suggests
+                  that prompt medical
+                  evaluation may be
+                  appropriate. This is
+                  different from an
+                  emergency
+                  classification.
                 </AlertDescription>
               </Alert>
             )}
@@ -1664,18 +1918,22 @@ function PatientAssessmentResult({
             </div>
 
             <p className="mt-3 text-sm leading-7 text-foreground">
-              {assessment.summary}
+              {
+                assessment.summary
+              }
             </p>
 
             {assessment.urgencyReason && (
               <div className="mt-4 rounded-lg border bg-background/60 px-4 py-3">
                 <p className="text-xs font-medium text-muted-foreground">
-                  Why this urgency level was
-                  selected
+                  Why this urgency
+                  level was selected
                 </p>
 
                 <p className="mt-1 text-sm leading-6">
-                  {assessment.urgencyReason}
+                  {
+                    assessment.urgencyReason
+                  }
                 </p>
               </div>
             )}
@@ -1691,12 +1949,16 @@ function PatientAssessmentResult({
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <CardTitle className="text-lg">
-                      Most closely matching possibility
+                      Most closely
+                      matching
+                      possibility
                     </CardTitle>
 
                     <CardDescription className="mt-1">
-                      This is a symptom match, not
-                      a confirmed diagnosis.
+                      This is a symptom
+                      match, not a
+                      confirmed
+                      diagnosis.
                     </CardDescription>
                   </div>
 
@@ -1704,9 +1966,11 @@ function PatientAssessmentResult({
                     variant="secondary"
                     className="shrink-0"
                   >
-                    {clampMatchStrength(
-                      top.likelihood,
-                    )}
+                    {
+                      clampMatchStrength(
+                        top.likelihood,
+                      )
+                    }
                     % match
                   </Badge>
                 </div>
@@ -1718,7 +1982,9 @@ function PatientAssessmentResult({
                 </h3>
 
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  {top.explanation}
+                  {
+                    top.explanation
+                  }
                 </p>
 
                 <div className="mt-4 flex flex-wrap gap-2">
@@ -1729,21 +1995,34 @@ function PatientAssessmentResult({
                       riskClass(
                         top.riskLevel,
                       ),
-                    ].join(" ")}
+                    ].join(
+                      " ",
+                    )}
                   >
                     Risk level:{" "}
-                    {top.riskLevel}
+                    {
+                      top.riskLevel
+                    }
                   </Badge>
 
                   {top.matchingSymptoms
-                    ?.slice(0, 4)
+                    ?.slice(
+                      0,
+                      4,
+                    )
                     .map(
-                      (symptom) => (
+                      (
+                        symptom,
+                      ) => (
                         <Badge
-                          key={symptom}
+                          key={
+                            symptom
+                          }
                           variant="secondary"
                         >
-                          {symptom}
+                          {
+                            symptom
+                          }
                         </Badge>
                       ),
                     )}
@@ -1756,7 +2035,9 @@ function PatientAssessmentResult({
                     </p>
 
                     <p className="mt-1 text-sm leading-6">
-                      {top.riskRationale}
+                      {
+                        top.riskRationale
+                      }
                     </p>
                   </div>
                 )}
@@ -1773,21 +2054,28 @@ function PatientAssessmentResult({
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg">
-                  Other possible explanations
+                  Other possible
+                  explanations
                 </CardTitle>
 
                 <CardDescription>
-                  These are ranked by symptom
-                  match strength and are not
+                  These are ranked by
+                  symptom match
+                  strength and are not
                   confirmed diagnoses.
                 </CardDescription>
               </CardHeader>
 
               <CardContent className="space-y-3">
                 {assessment.conditions
-                  .slice(1, 5)
+                  .slice(
+                    1,
+                    5,
+                  )
                   .map(
-                    (condition) => (
+                    (
+                      condition,
+                    ) => (
                       <div
                         key={
                           condition.name
@@ -1813,9 +2101,11 @@ function PatientAssessmentResult({
                             variant="secondary"
                             className="shrink-0"
                           >
-                            {clampMatchStrength(
-                              condition.likelihood,
-                            )}
+                            {
+                              clampMatchStrength(
+                                condition.likelihood,
+                              )
+                            }
                             %
                           </Badge>
                         </div>
@@ -1842,8 +2132,9 @@ function PatientAssessmentResult({
                   </CardTitle>
 
                   <CardDescription>
-                    These findings should be taken
-                    seriously when deciding what
+                    These findings should
+                    be taken seriously
+                    when deciding what
                     care is appropriate.
                   </CardDescription>
                 </CardHeader>
@@ -1851,15 +2142,21 @@ function PatientAssessmentResult({
                 <CardContent>
                   <ul className="space-y-2">
                     {assessment.redFlags.map(
-                      (flag) => (
+                      (
+                        flag,
+                      ) => (
                         <li
-                          key={flag}
+                          key={
+                            flag
+                          }
                           className="flex items-start gap-2 text-sm leading-6"
                         >
                           <span className="mt-2 size-1.5 shrink-0 rounded-full bg-destructive" />
 
                           <span>
-                            {flag}
+                            {
+                              flag
+                            }
                           </span>
                         </li>
                       ),
@@ -1884,7 +2181,9 @@ function PatientAssessmentResult({
 
             <CardContent>
               <p className="text-sm leading-7">
-                {assessment.generalAdvice}
+                {
+                  assessment.generalAdvice
+                }
               </p>
             </CardContent>
           </Card>
@@ -1909,15 +2208,21 @@ function PatientAssessmentResult({
                     0 ? (
                     <ul className="space-y-2">
                       {top.selfCare.map(
-                        (item) => (
+                        (
+                          item,
+                        ) => (
                           <li
-                            key={item}
+                            key={
+                              item
+                            }
                             className="flex items-start gap-2 text-sm leading-6 text-muted-foreground"
                           >
                             <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-primary" />
 
                             <span>
-                              {item}
+                              {
+                                item
+                              }
                             </span>
                           </li>
                         ),
@@ -1925,8 +2230,10 @@ function PatientAssessmentResult({
                     </ul>
                   ) : (
                     <p className="text-sm leading-6 text-muted-foreground">
-                      Follow the general advice
-                      above and monitor the
+                      Follow the
+                      general advice
+                      above and
+                      monitor the
                       symptoms.
                     </p>
                   )}
@@ -1936,13 +2243,16 @@ function PatientAssessmentResult({
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">
-                    Recommended next step
+                    Recommended
+                    next step
                   </CardTitle>
                 </CardHeader>
 
                 <CardContent>
                   <p className="text-sm leading-6 text-muted-foreground">
-                    {top.nextSteps}
+                    {
+                      top.nextSteps
+                    }
                   </p>
                 </CardContent>
               </Card>
@@ -1961,8 +2271,11 @@ function PatientAssessmentResult({
 
                 <div>
                   <p className="text-sm font-medium">
-                    Assessment confidence:{" "}
-                    {assessment.confidence}
+                    Assessment
+                    confidence:{" "}
+                    {
+                      assessment.confidence
+                    }
                   </p>
 
                   {assessment.confidenceNote && (
@@ -1978,20 +2291,31 @@ function PatientAssessmentResult({
                       0 && (
                       <div className="mt-3">
                         <p className="text-xs font-medium text-muted-foreground">
-                          Information that may
-                          improve the assessment
+                          Information that
+                          may improve
+                          the assessment
                         </p>
 
                         <ul className="mt-2 space-y-1">
                           {assessment.missingInfo
-                            .slice(0, 5)
+                            .slice(
+                              0,
+                              5,
+                            )
                             .map(
-                              (item) => (
+                              (
+                                item,
+                              ) => (
                                 <li
-                                  key={item}
+                                  key={
+                                    item
+                                  }
                                   className="text-xs text-muted-foreground"
                                 >
-                                  • {item}
+                                  •{" "}
+                                  {
+                                    item
+                                  }
                                 </li>
                               ),
                             )}
@@ -2004,18 +2328,21 @@ function PatientAssessmentResult({
           </Card>
 
           {/* -------------------------------------------------------------- */}
-          {/* IMPORTANT MATCH-STRENGTH NOTICE                                 */}
+          {/* MATCH STRENGTH NOTICE                                           */}
           {/* -------------------------------------------------------------- */}
 
           <div className="rounded-xl border bg-muted/40 px-4 py-3">
             <p className="text-xs leading-5 text-muted-foreground">
-              The percentage shown above is{" "}
+              The percentage shown
+              above is{" "}
               <span className="font-medium text-foreground">
-                symptom match strength
+                symptom match
+                strength
               </span>
-              . It is not a calibrated medical
-              probability and should not be
-              interpreted as a diagnosis.
+              . It is not a calibrated
+              medical probability and
+              should not be interpreted
+              as a diagnosis.
             </p>
           </div>
 
@@ -2031,7 +2358,8 @@ function PatientAssessmentResult({
               <AlertTriangle className="size-4" />
 
               <AlertTitle>
-                Could not save this check
+                Could not save this
+                check
               </AlertTitle>
 
               <AlertDescription>
@@ -2053,9 +2381,11 @@ function PatientAssessmentResult({
               </AlertTitle>
 
               <AlertDescription>
-                This check has been saved only
-                to {patientName}'s separate
-                patient history.
+                This check has been
+                saved only to{" "}
+                {patientName}'s
+                separate patient
+                history.
               </AlertDescription>
             </Alert>
           )}
@@ -2067,7 +2397,9 @@ function PatientAssessmentResult({
           <div className="grid gap-3 sm:grid-cols-3">
 
             <Button
-              onClick={onSave}
+              onClick={
+                onSave
+              }
               disabled={
                 savePending ||
                 Boolean(savedId)
@@ -2102,7 +2434,7 @@ function PatientAssessmentResult({
                 to="/patient-history/$patient_ID"
                 params={{
                   patient_ID:
-                    getPatientIdFromRoute(),
+                    patientId,
                 }}
               >
                 <Activity className="mr-2 size-4" />
@@ -2133,12 +2465,15 @@ function PatientAssessmentResult({
               <Clock3 className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
 
               <p className="text-xs leading-5 text-muted-foreground">
-                This assessment is decision
-                support based on the information
-                provided. It does not replace a
-                qualified healthcare professional.
-                Do not stop or change prescribed
-                medication based only on this
+                This assessment is
+                decision support based
+                on the information
+                provided. It does not
+                replace a qualified
+                healthcare professional.
+                Do not stop or change
+                prescribed medication
+                based only on this
                 result.
               </p>
             </div>
@@ -2148,20 +2483,4 @@ function PatientAssessmentResult({
       </Card>
     </div>
   );
-}
-
-/* -------------------------------------------------------------------------- */
-/*                      ROUTE PARAMETER HELPER                                */
-/* -------------------------------------------------------------------------- */
-
-/*
- * This function is intentionally kept separate from the patient object.
- *
- * The actual route already contains the patient ID and the Link above
- * should receive that same ID.
- *
- * We use the current route object here rather than inventing a new patient ID.
- */
-function getPatientIdFromRoute() {
-  return Route.useParams().patient_ID;
 }
