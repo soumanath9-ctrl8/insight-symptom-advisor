@@ -34,7 +34,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 
 export const Route = createFileRoute(
-  "/_authenticated/patient-history/$patientId",
+  "/_authenticated/patient-checker/$patient_ID",
 )({
   ssr: false,
 
