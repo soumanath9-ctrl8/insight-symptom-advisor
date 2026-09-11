@@ -1,6 +1,13 @@
-
-import { createFileRoute, Link, redirect } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  createFileRoute,
+  Link,
+  redirect,
+} from "@tanstack/react-router";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useMemo } from "react";
 import {
   Activity,
@@ -41,31 +48,21 @@ import { Separator } from "@/components/ui/separator";
  *
  * IMPORTANT:
  *
- * This file is the PATIENT HISTORY page.
+ * This is the PATIENT HISTORY route.
  *
- * Therefore its route MUST be:
+ * Patient Symptom Checker:
+ * /patient-checker/$patient_ID
  *
- * /patient-history/$patientId
- *
- * The actual Patient Symptom Checker is a separate route:
- *
- * /patient-checker/$patientId
- *
- * Do not mix these two routes.
+ * Patient History:
+ * /patient-history/$patient_ID
  */
 
 export const Route = createFileRoute(
-  "/_authenticated/patient-checker/$patient_ID",
+  "/_authenticated/patient-history/$patient_ID",
 )({
   ssr: false,
 
   beforeLoad: async ({ params }) => {
-    /*
-     * A valid patient ID is required.
-     *
-     * If somebody opens the route without a patient ID,
-     * send them back to the patient list.
-     */
     if (!params.patient_ID) {
       throw redirect({
         to: "/patients",
@@ -87,19 +84,16 @@ export const Route = createFileRoute(
  */
 
 function PatientHistoryPage() {
-  const { patient_ID: patientId } = Route.useParams();
+  const { patient_ID: patientId } =
+    Route.useParams();
 
-  const queryClient = useQueryClient();
+  const queryClient =
+    useQueryClient();
 
   /*
    * =======================================================
    * PATIENT PROFILE
    * =======================================================
-   *
-   * Only the selected patient is loaded.
-   *
-   * This does NOT load the logged-in user's own profile
-   * history.
    */
 
   const patientQuery = useQuery({
@@ -120,12 +114,12 @@ function PatientHistoryPage() {
    *
    * IMPORTANT:
    *
-   * We intentionally use listPatientChecks().
+   * Never use listChecks() here.
    *
-   * We DO NOT use listChecks().
+   * listPatientChecks() only returns:
    *
-   * Therefore this page only shows history belonging to
-   * this selected patient.
+   * subject_type = patient
+   * patient_id = selected patient
    */
 
   const historyQuery = useQuery({
@@ -141,86 +135,80 @@ function PatientHistoryPage() {
 
   /*
    * =======================================================
-   * DELETE HISTORY ENTRY
+   * DELETE HISTORY
    * =======================================================
-   *
-   * The backend deleteCheck() performs the ownership check.
-   *
-   * After successful deletion, only this patient's history
-   * query is invalidated.
    */
 
-  const removeMutation = useMutation({
-    mutationFn: (id: string) =>
-      deleteCheck({
-        data: {
-          id,
-        },
-      }),
+  const removeMutation =
+    useMutation({
+      mutationFn: (id: string) =>
+        deleteCheck({
+          data: {
+            id,
+          },
+        }),
 
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["patient-checks", patientId],
-      });
-    },
-  });
+      onSuccess: () => {
+        queryClient.invalidateQueries({
+          queryKey: [
+            "patient-checks",
+            patientId,
+          ],
+        });
+      },
+    });
+
+  const patient =
+    patientQuery.data;
+
+  const history: HistoryEntry[] =
+    historyQuery.data ?? [];
 
   /*
    * =======================================================
-   * DATA
+   * CHRONOLOGICAL HISTORY
    * =======================================================
    */
 
-  const patient = patientQuery.data;
-
-  const history: HistoryEntry[] = historyQuery.data ?? [];
-
-  /*
-   * Sort oldest -> newest.
-   *
-   * This makes:
-   *
-   * - trend calculation
-   * - graph
-   * - previous/latest comparison
-   *
-   * deterministic.
-   */
-
-  const sortedHistory = useMemo(() => {
-    return [...history].sort(
-      (a, b) =>
-        new Date(a.date).getTime() -
-        new Date(b.date).getTime(),
-    );
-  }, [history]);
+  const sortedHistory =
+    useMemo(() => {
+      return [...history].sort(
+        (a, b) =>
+          new Date(a.date).getTime() -
+          new Date(b.date).getTime(),
+      );
+    }, [history]);
 
   /*
    * =======================================================
-   * LATEST SEVERITY
+   * LATEST MATCH STRENGTH
    * =======================================================
    */
 
-  const latestSeverity =
+  const latestMatchStrength =
     sortedHistory.length > 0
-      ? clampSeverity(
+      ? clampMatchStrength(
           Number(
-            sortedHistory[sortedHistory.length - 1]?.severity ?? 0,
+            sortedHistory[
+              sortedHistory.length - 1
+            ]?.severity ?? 0,
           ),
         )
       : 0;
 
   /*
    * =======================================================
-   * PREVIOUS SEVERITY
+   * PREVIOUS MATCH STRENGTH
    * =======================================================
    */
 
-  const previousSeverity =
+  const previousMatchStrength =
     sortedHistory.length > 1
-      ? clampSeverity(
+      ? clampMatchStrength(
           Number(
-            sortedHistory[sortedHistory.length - 2]?.severity ?? 0,
+            sortedHistory[
+              sortedHistory.length - 2
+            ]?.severity ?? 0,
           ),
         )
       : null;
@@ -232,26 +220,30 @@ function PatientHistoryPage() {
    */
 
   const trend =
-    previousSeverity === null
+    previousMatchStrength === null
       ? "stable"
-      : latestSeverity > previousSeverity
+      : latestMatchStrength >
+          previousMatchStrength
         ? "up"
-        : latestSeverity < previousSeverity
+        : latestMatchStrength <
+            previousMatchStrength
           ? "down"
           : "stable";
 
   /*
    * =======================================================
-   * AVERAGE
+   * AVERAGE MATCH STRENGTH
    * =======================================================
    */
 
-  const averageSeverity =
+  const averageMatchStrength =
     sortedHistory.length > 0
       ? sortedHistory.reduce(
           (sum, entry) =>
             sum +
-            clampSeverity(Number(entry.severity)),
+            clampMatchStrength(
+              Number(entry.severity),
+            ),
           0,
         ) / sortedHistory.length
       : 0;
@@ -287,13 +279,20 @@ function PatientHistoryPage() {
    * =======================================================
    */
 
-  if (patientQuery.error || !patient) {
+  if (
+    patientQuery.error ||
+    !patient
+  ) {
     return (
       <main className="min-h-screen bg-background">
         <ProfileMenu />
 
         <div className="mx-auto max-w-3xl px-5 py-10 sm:py-16">
-          <Button asChild variant="ghost" size="sm">
+          <Button
+            asChild
+            variant="ghost"
+            size="sm"
+          >
             <Link to="/patients">
               <ArrowLeft className="mr-2 size-4" />
 
@@ -308,8 +307,8 @@ function PatientHistoryPage() {
               </CardTitle>
 
               <CardDescription>
-                This patient may have been deleted or may
-                not belong to your account.
+                This patient may have been deleted
+                or may not belong to your account.
               </CardDescription>
             </CardHeader>
 
@@ -338,7 +337,11 @@ function PatientHistoryPage() {
         <ProfileMenu />
 
         <div className="mx-auto max-w-4xl px-5 py-10 sm:py-16">
-          <Button asChild variant="ghost" size="sm">
+          <Button
+            asChild
+            variant="ghost"
+            size="sm"
+          >
             <Link
               to="/patient-checker/$patient_ID"
               params={{
@@ -362,14 +365,16 @@ function PatientHistoryPage() {
               </h2>
 
               <p className="mt-2 max-w-md text-sm text-muted-foreground">
-                Something went wrong while loading the
-                saved checks for this patient.
+                Something went wrong while loading
+                the saved checks for this patient.
               </p>
 
               <Button
                 className="mt-5"
                 variant="outline"
-                onClick={() => historyQuery.refetch()}
+                onClick={() =>
+                  historyQuery.refetch()
+                }
               >
                 Try Again
               </Button>
@@ -396,7 +401,11 @@ function PatientHistoryPage() {
             BACK TO PATIENT CHECKER
         ================================================== */}
 
-        <Button asChild variant="ghost" size="sm">
+        <Button
+          asChild
+          variant="ghost"
+          size="sm"
+        >
           <Link
             to="/patient-checker/$patient_ID"
             params={{
@@ -445,8 +454,8 @@ function PatientHistoryPage() {
             <span className="font-medium text-foreground">
               {patient.name}
             </span>
-            's separate symptom history. It does not
-            include your own self-check history.
+            's separate symptom history. It does
+            not include your own self-check history.
           </p>
         </div>
 
@@ -457,7 +466,6 @@ function PatientHistoryPage() {
         {history.length === 0 ? (
           <Card>
             <CardContent className="flex min-h-72 flex-col items-center justify-center px-6 text-center">
-
               <div className="flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary">
                 <BarChart3 className="size-7" />
               </div>
@@ -467,20 +475,14 @@ function PatientHistoryPage() {
               </h2>
 
               <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
-                No saved symptom checks have been recorded
-                for {patient.name} yet.
+                No saved symptom checks have been
+                recorded for {patient.name} yet.
               </p>
 
-              {/* =================================================
-                  IMPORTANT FIX
-                  
-                  This button goes to the SEPARATE PATIENT
-                  SYMPTOM CHECKER route.
-                  
-                  It does NOT link back to this history page.
-              ================================================== */}
-
-              <Button asChild className="mt-6">
+              <Button
+                asChild
+                className="mt-6"
+              >
                 <Link
                   to="/patient-checker/$patient_ID"
                   params={{
@@ -507,17 +509,19 @@ function PatientHistoryPage() {
                   <CalendarDays className="size-5" />
                 }
                 label="Saved checks"
-                value={String(history.length)}
+                value={String(
+                  history.length,
+                )}
               />
 
               <SummaryCard
                 icon={
                   <Activity className="size-5" />
                 }
-                label="Latest severity"
-                value={`${formatSeverity(
-                  latestSeverity,
-                )}/10`}
+                label="Latest match strength"
+                value={`${formatMatchStrength(
+                  latestMatchStrength,
+                )}%`}
               />
 
               <SummaryCard
@@ -548,18 +552,17 @@ function PatientHistoryPage() {
             <Card className="overflow-hidden">
               <CardHeader className="pb-2">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-
                   <div>
                     <CardTitle className="flex items-center gap-2">
                       <BarChart3 className="size-5" />
 
-                      Symptom Severity Trend
+                      Symptom Match Strength Trend
                     </CardTitle>
 
                     <CardDescription className="mt-1">
-                      Severity recorded across{" "}
-                      {patient.name}'s saved symptom
-                      checks.
+                      Symptom-match strength recorded
+                      across {patient.name}'s saved
+                      symptom checks.
                     </CardDescription>
                   </div>
 
@@ -573,28 +576,27 @@ function PatientHistoryPage() {
               </CardHeader>
 
               <CardContent className="pt-5">
-
-                <SeverityGraph
+                <MatchStrengthGraph
                   entries={sortedHistory}
                 />
 
                 <div className="mt-5 flex items-start justify-between gap-4 text-xs text-muted-foreground">
-                  <span>0 — Minimal</span>
+                  <span>0% — Low match</span>
 
                   <span className="text-center">
-                    Severity scale
+                    Symptom Match Strength
                   </span>
 
-                  <span>10 — Severe</span>
+                  <span>100% — Strong match</span>
                 </div>
 
                 <Separator className="my-5" />
 
                 <div className="rounded-lg bg-muted/50 px-4 py-3 text-xs leading-5 text-muted-foreground">
-                  This graph shows the severity recorded
-                  during saved checks. It is a history and
-                  trend view, not a diagnosis or a clinically
-                  validated probability.
+                  This graph shows symptom-match
+                  strength recorded during saved checks.
+                  It is not a diagnosis and the percentage
+                  is not a clinically validated probability.
                 </div>
               </CardContent>
             </Card>
@@ -610,10 +612,13 @@ function PatientHistoryPage() {
                 </CardTitle>
 
                 <CardDescription>
-                  Average recorded severity across this
-                  patient's saved checks:{" "}
+                  Average symptom-match strength across
+                  this patient's saved checks:{" "}
                   <span className="font-medium text-foreground">
-                    {averageSeverity.toFixed(1)}/10
+                    {formatMatchStrength(
+                      averageMatchStrength,
+                    )}
+                    %
                   </span>
                   .
                 </CardDescription>
@@ -646,8 +651,8 @@ function PatientHistoryPage() {
                 </h2>
 
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Review or remove individual entries from{" "}
-                  {patient.name}'s history.
+                  Review or remove individual entries
+                  from {patient.name}'s history.
                 </p>
               </div>
 
@@ -687,13 +692,6 @@ function PatientHistoryPage() {
         ================================================== */}
 
         <div className="flex flex-col gap-3 sm:flex-row">
-
-          {/* =================================================
-              IMPORTANT FIX
-              
-              This is the actual Patient Symptom Checker.
-          ================================================== */}
-
           <Button
             asChild
             variant="outline"
@@ -708,10 +706,6 @@ function PatientHistoryPage() {
               Check {patient.name}'s Symptoms
             </Link>
           </Button>
-
-          {/* =================================================
-              ALL PATIENT PROFILES
-          ================================================== */}
 
           <Button
             asChild
@@ -746,7 +740,6 @@ function SummaryCard({
   return (
     <Card>
       <CardContent className="flex items-center gap-4 p-5">
-
         <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
           {icon}
         </div>
@@ -776,17 +769,17 @@ function HistorySummaryRow({
 }: {
   entry: HistoryEntry;
 }) {
-  const severity = clampSeverity(
-    Number(entry.severity),
-  );
+  const matchStrength =
+    clampMatchStrength(
+      Number(entry.severity),
+    );
 
-  const dateLabel = formatHistoryDate(entry.date);
+  const dateLabel =
+    formatHistoryDate(entry.date);
 
   return (
     <div className="flex flex-col gap-3 rounded-xl border bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
-
       <div className="min-w-0">
-
         <div className="flex items-center gap-2">
           <CalendarDays className="size-4 shrink-0 text-muted-foreground" />
 
@@ -796,7 +789,8 @@ function HistorySummaryRow({
         </div>
 
         <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">
-          {entry.symptoms || "Symptom check"}
+          {entry.symptoms ||
+            "Symptom check"}
         </p>
 
         {entry.topCondition && (
@@ -811,12 +805,17 @@ function HistorySummaryRow({
 
       <div className="flex shrink-0 items-center gap-3 sm:flex-col sm:items-end">
         <Badge variant="secondary">
-          {formatSeverity(severity)}/10
+          {formatMatchStrength(
+            matchStrength,
+          )}
+          %
         </Badge>
 
         {entry.urgency && (
           <span className="text-xs text-muted-foreground">
-            {formatUrgency(entry.urgency)}
+            {formatUrgency(
+              entry.urgency,
+            )}
           </span>
         )}
       </div>
@@ -826,22 +825,29 @@ function HistorySummaryRow({
 
 /*
  * =========================================================
- * SEVERITY GRAPH
+ * MATCH STRENGTH GRAPH
  * =========================================================
  *
- * This is a lightweight SVG graph so we do not need another
- * chart dependency.
+ * Database column:
+ * severity
+ *
+ * Application meaning:
+ * 0–100 symptom-match strength
+ *
+ * This is NOT:
+ * - diagnostic probability
+ * - medical risk percentage
+ * - confirmed diagnosis probability
  */
 
-function SeverityGraph({
+function MatchStrengthGraph({
   entries,
 }: {
   entries: HistoryEntry[];
 }) {
   /*
-   * Show at most the latest 10 entries.
-   *
-   * We keep them in chronological order.
+   * Show latest 10 entries while keeping
+   * chronological order.
    */
 
   const points = entries.slice(-10);
@@ -865,47 +871,97 @@ function SeverityGraph({
   const paddingBottom = 44;
 
   const chartWidth =
-    width - paddingLeft - paddingRight;
+    width -
+    paddingLeft -
+    paddingRight;
 
   const chartHeight =
-    height - paddingTop - paddingBottom;
+    height -
+    paddingTop -
+    paddingBottom;
 
-  const getX = (index: number) => {
+  const getX = (
+    index: number,
+  ) => {
     if (points.length === 1) {
-      return paddingLeft + chartWidth / 2;
+      return (
+        paddingLeft +
+        chartWidth / 2
+      );
     }
 
     return (
       paddingLeft +
-      (index / (points.length - 1)) * chartWidth
+      (index /
+        (points.length - 1)) *
+        chartWidth
     );
   };
 
-  const getY = (severity: number) => {
-    const value = clampSeverity(severity);
+  const getY = (
+    matchStrength: number,
+  ) => {
+    const value =
+      clampMatchStrength(
+        matchStrength,
+      );
 
     return (
       paddingTop +
-      (1 - value / 10) * chartHeight
+      (1 - value / 100) *
+        chartHeight
     );
   };
 
-  const coordinates = points.map((entry, index) => ({
-    x: getX(index),
-    y: getY(Number(entry.severity)),
-    value: clampSeverity(Number(entry.severity)),
-    entry,
-  }));
+  const coordinates =
+    points.map(
+      (
+        entry,
+        index,
+      ) => ({
+        x: getX(index),
 
-  const path = coordinates
-    .map((point, index) =>
-      index === 0
-        ? `M ${point.x} ${point.y}`
-        : `L ${point.x} ${point.y}`,
-    )
-    .join(" ");
+        y: getY(
+          Number(
+            entry.severity,
+          ),
+        ),
 
-  const gridValues = [0, 2, 4, 6, 8, 10];
+        value:
+          clampMatchStrength(
+            Number(
+              entry.severity,
+            ),
+          ),
+
+        entry,
+      }),
+    );
+
+  const path =
+    coordinates
+      .map(
+        (
+          point,
+          index,
+        ) =>
+          index === 0
+            ? `M ${point.x} ${point.y}`
+            : `L ${point.x} ${point.y}`,
+      )
+      .join(" ");
+
+  /*
+   * 0–100 scale.
+   */
+
+  const gridValues = [
+    0,
+    25,
+    50,
+    75,
+    100,
+  ];
 
   return (
     <div className="w-full overflow-x-auto">
@@ -914,38 +970,51 @@ function SeverityGraph({
           viewBox={`0 0 ${width} ${height}`}
           className="h-auto w-full"
           role="img"
-          aria-label="Patient symptom severity trend graph"
+          aria-label="Patient symptom match strength trend graph"
         >
           {/* =================================================
               GRID
           ================================================== */}
 
-          {gridValues.map((value) => {
-            const y = getY(value);
+          {gridValues.map(
+            (value) => {
+              const y =
+                getY(value);
 
-            return (
-              <g key={value}>
-                <line
-                  x1={paddingLeft}
-                  x2={width - paddingRight}
-                  y1={y}
-                  y2={y}
-                  stroke="currentColor"
-                  strokeOpacity="0.12"
-                  strokeWidth="1"
-                />
+              return (
+                <g key={value}>
+                  <line
+                    x1={
+                      paddingLeft
+                    }
+                    x2={
+                      width -
+                      paddingRight
+                    }
+                    y1={y}
+                    y2={y}
+                    stroke="currentColor"
+                    strokeOpacity="0.12"
+                    strokeWidth="1"
+                  />
 
-                <text
-                  x={paddingLeft - 10}
-                  y={y + 4}
-                  textAnchor="end"
-                  className="fill-muted-foreground text-[11px]"
-                >
-                  {value}
-                </text>
-              </g>
-            );
-          })}
+                  <text
+                    x={
+                      paddingLeft -
+                      10
+                    }
+                    y={
+                      y + 4
+                    }
+                    textAnchor="end"
+                    className="fill-muted-foreground text-[11px]"
+                  >
+                    {value}%
+                  </text>
+                </g>
+              );
+            },
+          )}
 
           {/* =================================================
               AXIS
@@ -955,16 +1024,28 @@ function SeverityGraph({
             x1={paddingLeft}
             x2={paddingLeft}
             y1={paddingTop}
-            y2={height - paddingBottom}
+            y2={
+              height -
+              paddingBottom
+            }
             stroke="currentColor"
             strokeOpacity="0.2"
           />
 
           <line
             x1={paddingLeft}
-            x2={width - paddingRight}
-            y1={height - paddingBottom}
-            y2={height - paddingBottom}
+            x2={
+              width -
+              paddingRight
+            }
+            y1={
+              height -
+              paddingBottom
+            }
+            y2={
+              height -
+              paddingBottom
+            }
             stroke="currentColor"
             strokeOpacity="0.2"
           />
@@ -973,7 +1054,8 @@ function SeverityGraph({
               TREND LINE
           ================================================== */}
 
-          {coordinates.length > 1 && (
+          {coordinates.length >
+            1 && (
             <path
               d={path}
               fill="none"
@@ -989,50 +1071,81 @@ function SeverityGraph({
               DATA POINTS
           ================================================== */}
 
-          {coordinates.map((point, index) => (
-            <g key={point.entry.id}>
-
-              <circle
-                cx={point.x}
-                cy={point.y}
-                r="6"
-                className="fill-primary"
-              />
-
-              <circle
-                cx={point.x}
-                cy={point.y}
-                r="10"
-                fill="none"
-                stroke="currentColor"
-                strokeOpacity="0.12"
-              />
-
-              {/* Value */}
-
-              <text
-                x={point.x}
-                y={point.y - 14}
-                textAnchor="middle"
-                className="fill-foreground text-[11px] font-medium"
+          {coordinates.map(
+            (
+              point,
+            ) => (
+              <g
+                key={
+                  point.entry.id
+                }
               >
-                {point.value}
-              </text>
+                <circle
+                  cx={
+                    point.x
+                  }
+                  cy={
+                    point.y
+                  }
+                  r="6"
+                  className="fill-primary"
+                />
 
-              {/* Date */}
+                <circle
+                  cx={
+                    point.x
+                  }
+                  cy={
+                    point.y
+                  }
+                  r="10"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeOpacity="0.12"
+                />
 
-              <text
-                x={point.x}
-                y={height - paddingBottom + 22}
-                textAnchor="middle"
-                className="fill-muted-foreground text-[10px]"
-              >
-                {formatShortDate(
-                  point.entry.date,
-                )}
-              </text>
-            </g>
-          ))}
+                {/* Match strength */}
+
+                <text
+                  x={
+                    point.x
+                  }
+                  y={
+                    point.y -
+                    14
+                  }
+                  textAnchor="middle"
+                  className="fill-foreground text-[11px] font-medium"
+                >
+                  {
+                    point.value
+                  }
+                  %
+                </text>
+
+                {/* Date */}
+
+                <text
+                  x={
+                    point.x
+                  }
+                  y={
+                    height -
+                    paddingBottom +
+                    22
+                  }
+                  textAnchor="middle"
+                  className="fill-muted-foreground text-[10px]"
+                >
+                  {formatShortDate(
+                    point
+                      .entry
+                      .date,
+                  )}
+                </text>
+              </g>
+            ),
+          )}
 
           {/* =================================================
               Y-AXIS LABEL
@@ -1040,12 +1153,14 @@ function SeverityGraph({
 
           <text
             x="14"
-            y={height / 2}
+            y={
+              height / 2
+            }
             transform={`rotate(-90 14 ${height / 2})`}
             textAnchor="middle"
             className="fill-muted-foreground text-[10px]"
           >
-            Severity
+            Match Strength
           </text>
         </svg>
       </div>
@@ -1059,42 +1174,80 @@ function SeverityGraph({
  * =========================================================
  */
 
-function clampSeverity(value: number) {
-  if (!Number.isFinite(value)) {
+function clampMatchStrength(
+  value: number,
+) {
+  if (
+    !Number.isFinite(
+      value,
+    )
+  ) {
     return 0;
   }
 
-  return Math.min(10, Math.max(0, value));
+  return Math.min(
+    100,
+    Math.max(
+      0,
+      value,
+    ),
+  );
 }
 
-function formatSeverity(value: number) {
-  return clampSeverity(value).toFixed(1);
+function formatMatchStrength(
+  value: number,
+) {
+  return clampMatchStrength(
+    value,
+  ).toFixed(1);
 }
 
-function formatHistoryDate(value: string) {
-  const date = new Date(value);
+function formatHistoryDate(
+  value: string,
+) {
+  const date =
+    new Date(value);
 
-  if (Number.isNaN(date.getTime())) {
+  if (
+    Number.isNaN(
+      date.getTime(),
+    )
+  ) {
     return value;
   }
 
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+  return new Intl.DateTimeFormat(
+    undefined,
+    {
+      dateStyle:
+        "medium",
+      timeStyle:
+        "short",
+    },
+  ).format(date);
 }
 
-function formatShortDate(value: string) {
-  const date = new Date(value);
+function formatShortDate(
+  value: string,
+) {
+  const date =
+    new Date(value);
 
-  if (Number.isNaN(date.getTime())) {
+  if (
+    Number.isNaN(
+      date.getTime(),
+    )
+  ) {
     return "";
   }
 
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-  }).format(date);
+  return new Intl.DateTimeFormat(
+    undefined,
+    {
+      month: "short",
+      day: "numeric",
+    },
+  ).format(date);
 }
 
 function formatUrgency(
