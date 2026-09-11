@@ -34,7 +34,7 @@ export const Route = createFileRoute("/_authenticated/history")({
       {
         name: "description",
         content:
-          "Review your saved symptom checks and see your symptom severity trend over time.",
+          "Review your saved symptom checks and symptom-match trend over time.",
       },
       {
         property: "og:title",
@@ -43,7 +43,7 @@ export const Route = createFileRoute("/_authenticated/history")({
       {
         property: "og:description",
         content:
-          "Your private symptom-check timeline and severity trend.",
+          "Your private symptom-check timeline and symptom-match trend.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -92,29 +92,34 @@ function HistoryBody() {
     );
   }, [history]);
 
-  const latestSeverity =
+  const latestMatchStrength =
     sortedHistory.length > 0
-      ? Number(sortedHistory[sortedHistory.length - 1].severity) || 0
+      ? normalizeMatchStrength(
+          sortedHistory[sortedHistory.length - 1].severity,
+        )
       : 0;
 
-  const previousSeverity =
+  const previousMatchStrength =
     sortedHistory.length > 1
-      ? Number(sortedHistory[sortedHistory.length - 2].severity) || 0
+      ? normalizeMatchStrength(
+          sortedHistory[sortedHistory.length - 2].severity,
+        )
       : null;
 
   const trend =
-    previousSeverity === null
+    previousMatchStrength === null
       ? "stable"
-      : latestSeverity > previousSeverity
+      : latestMatchStrength > previousMatchStrength
         ? "up"
-        : latestSeverity < previousSeverity
+        : latestMatchStrength < previousMatchStrength
           ? "down"
           : "stable";
 
-  const averageSeverity =
+  const averageMatchStrength =
     sortedHistory.length > 0
       ? sortedHistory.reduce(
-          (sum, entry) => sum + (Number(entry.severity) || 0),
+          (sum, entry) =>
+            sum + normalizeMatchStrength(entry.severity),
           0,
         ) / sortedHistory.length
       : 0;
@@ -139,7 +144,12 @@ function HistoryBody() {
 
       <div className="mx-auto w-full max-w-4xl space-y-6 px-5 py-8 sm:py-12">
         <Button asChild variant="ghost" size="sm">
-          <Link to="/checker">
+          <Link
+            to="/checker"
+            search={{
+              subject: "self",
+            }}
+          >
             <ArrowLeft className="mr-2 size-4" />
             {t.tabCheck}
           </Link>
@@ -157,7 +167,7 @@ function HistoryBody() {
               </h1>
 
               <p className="mt-1 text-sm text-muted-foreground">
-                Your saved self-checks and symptom severity trend.
+                Your saved self-checks and symptom-match trend.
               </p>
             </div>
           </div>
@@ -210,7 +220,8 @@ function HistoryBody() {
 
               <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
                 Complete and save a symptom check for yourself. Your
-                saved checks will appear here with a severity trend.
+                saved checks will appear here with a symptom-match
+                trend.
               </p>
 
               <Button asChild className="mt-6">
@@ -239,8 +250,8 @@ function HistoryBody() {
 
               <SummaryCard
                 icon={<Activity className="size-5" />}
-                label="Latest severity"
-                value={`${formatSeverity(latestSeverity)}/10`}
+                label="Latest match strength"
+                value={`${formatMatchStrength(latestMatchStrength)}%`}
               />
 
               <SummaryCard
@@ -270,12 +281,12 @@ function HistoryBody() {
                   <div>
                     <CardTitle className="flex items-center gap-2">
                       <BarChart3 className="size-5" />
-                      Symptom Severity Trend
+                      Symptom Match Trend
                     </CardTitle>
 
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Severity reported during your saved self-checks
-                      over time.
+                      Match strength recorded during your saved
+                      self-checks over time.
                     </p>
                   </div>
 
@@ -287,23 +298,23 @@ function HistoryBody() {
               </CardHeader>
 
               <CardContent className="pt-5">
-                <SeverityGraph entries={sortedHistory} />
+                <MatchStrengthGraph entries={sortedHistory} />
 
                 <div className="mt-5 flex items-start justify-between gap-4 text-xs text-muted-foreground">
-                  <span>0 — Minimal</span>
+                  <span>0 — Lower</span>
                   <span className="text-center">
-                    Severity scale
+                    Symptom match strength
                   </span>
-                  <span>10 — Severe</span>
+                  <span>100 — Higher</span>
                 </div>
 
                 <Separator className="my-5" />
 
                 <div className="rounded-lg bg-muted/50 px-4 py-3 text-xs leading-5 text-muted-foreground">
-                  This graph shows the severity recorded during your
-                  saved checks. It is a history/trend view and does not
-                  represent a diagnosis or a clinically validated
-                  probability.
+                  This graph shows the symptom-match strength recorded
+                  during your saved checks. It is a history/trend
+                  measure and is not a diagnosis or a clinically
+                  validated probability.
                 </div>
               </CardContent>
             </Card>
@@ -315,10 +326,10 @@ function HistoryBody() {
                 </CardTitle>
 
                 <p className="text-sm text-muted-foreground">
-                  Your average recorded severity across these saved
-                  checks is{" "}
+                  Your average recorded symptom-match strength across
+                  these saved checks is{" "}
                   <span className="font-medium text-foreground">
-                    {averageSeverity.toFixed(1)}/10
+                    {averageMatchStrength.toFixed(1)}%
                   </span>
                   .
                 </p>
@@ -330,29 +341,35 @@ function HistoryBody() {
                     .slice()
                     .reverse()
                     .slice(0, 5)
-                    .map((entry) => (
-                      <div
-                        key={entry.id}
-                        className="flex items-center justify-between gap-4 rounded-lg border bg-background px-4 py-3"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">
-                            {entry.symptoms || "Symptom check"}
-                          </p>
+                    .map((entry) => {
+                      const matchStrength = normalizeMatchStrength(
+                        entry.severity,
+                      );
 
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {formatDate(entry.date)}
-                          </p>
+                      return (
+                        <div
+                          key={entry.id}
+                          className="flex items-center justify-between gap-4 rounded-lg border bg-background px-4 py-3"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">
+                              {entry.symptoms || "Symptom check"}
+                            </p>
+
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {formatDate(entry.date)}
+                            </p>
+                          </div>
+
+                          <Badge
+                            variant="outline"
+                            className="shrink-0"
+                          >
+                            {formatMatchStrength(matchStrength)}%
+                          </Badge>
                         </div>
-
-                        <Badge variant="outline" className="shrink-0">
-                          {formatSeverity(
-                            Number(entry.severity) || 0,
-                          )}
-                          /10
-                        </Badge>
-                      </div>
-                    ))}
+                      );
+                    })}
                 </div>
               </CardContent>
             </Card>
@@ -428,7 +445,7 @@ function SummaryCard({
   );
 }
 
-function SeverityGraph({
+function MatchStrengthGraph({
   entries,
 }: {
   entries: HistoryEntry[];
@@ -447,10 +464,7 @@ function SeverityGraph({
   const chartHeight = height - padding.top - padding.bottom;
 
   const points = entries.map((entry, index) => {
-    const severity = Math.max(
-      0,
-      Math.min(10, Number(entry.severity) || 0),
-    );
+    const matchStrength = normalizeMatchStrength(entry.severity);
 
     const x =
       entries.length === 1
@@ -461,12 +475,12 @@ function SeverityGraph({
     const y =
       padding.top +
       chartHeight -
-      (severity / 10) * chartHeight;
+      (matchStrength / 100) * chartHeight;
 
     return {
       x,
       y,
-      severity,
+      matchStrength,
       entry,
     };
   });
@@ -482,7 +496,7 @@ function SeverityGraph({
           .join(" ")
       : "";
 
-  const gridValues = [0, 2, 4, 6, 8, 10];
+  const gridValues = [0, 20, 40, 60, 80, 100];
 
   return (
     <div className="w-full overflow-x-auto">
@@ -491,13 +505,13 @@ function SeverityGraph({
           viewBox={`0 0 ${width} ${height}`}
           className="h-auto w-full overflow-visible"
           role="img"
-          aria-label="Symptom severity trend graph"
+          aria-label="Symptom match strength trend graph"
         >
           {gridValues.map((value) => {
             const y =
               padding.top +
               chartHeight -
-              (value / 10) * chartHeight;
+              (value / 100) * chartHeight;
 
             return (
               <g key={value}>
@@ -569,7 +583,7 @@ function SeverityGraph({
                 textAnchor="middle"
                 className="fill-foreground text-[11px] font-medium"
               >
-                {formatSeverity(point.severity)}
+                {formatMatchStrength(point.matchStrength)}%
               </text>
 
               <text
@@ -578,7 +592,11 @@ function SeverityGraph({
                 textAnchor="middle"
                 className="fill-muted-foreground text-[10px]"
               >
-                {formatGraphDate(point.entry.date, index, entries.length)}
+                {formatGraphDate(
+                  point.entry.date,
+                  index,
+                  entries.length,
+                )}
               </text>
             </g>
           ))}
@@ -588,8 +606,18 @@ function SeverityGraph({
   );
 }
 
-function formatSeverity(value: number) {
-  const safe = Math.max(0, Math.min(10, value));
+function normalizeMatchStrength(value: unknown) {
+  const numeric = Number(value);
+
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(100, numeric));
+}
+
+function formatMatchStrength(value: number) {
+  const safe = normalizeMatchStrength(value);
 
   return Number.isInteger(safe)
     ? String(safe)
@@ -605,13 +633,6 @@ function formatGraphDate(
 
   if (Number.isNaN(parsed.getTime())) {
     return `#${index + 1}`;
-  }
-
-  if (total > 8) {
-    return parsed.toLocaleDateString(undefined, {
-      day: "numeric",
-      month: "short",
-    });
   }
 
   return parsed.toLocaleDateString(undefined, {
