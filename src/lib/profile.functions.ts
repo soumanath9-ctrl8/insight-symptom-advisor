@@ -575,6 +575,27 @@ export const listPatientProfiles = createServerFn({ method: "GET" })
   },
 );
 
+export const getPatient = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({ id: z.string().uuid() }))
+  .handler(async ({ data, context }) => {
+    const userId = requireUserId(context);
+    const supabaseAdmin = await getSupabaseAdmin();
+
+    const { data: patient, error } = await supabaseAdmin
+      .from("patient_profiles")
+      .select("*")
+      .eq("id", data.id)
+      .eq("owner_user_id", userId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Unable to load patient: ${databaseError(error)}`);
+    }
+
+    return fromUiRow(patient as unknown as Record<string, unknown> | null);
+  });
+
 export const createPatientProfile = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(UiProfileSchema)

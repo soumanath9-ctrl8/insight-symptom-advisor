@@ -12,7 +12,7 @@ import {
   UserRound,
 } from "lucide-react";
 
-import { getPatient } from "@/lib/patient.functions";
+import { getPatient } from "@/lib/profile.functions";
 import {
   deleteCheck,
   listPatientChecks,

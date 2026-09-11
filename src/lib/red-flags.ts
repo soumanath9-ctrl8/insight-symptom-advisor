@@ -380,6 +380,8 @@ function isMatchNegated(
         beforeNegations.length - 1
       ];
 
+    if (!nearest) return false;
+
     const absoluteNegationStart =
       beforeStart +
       nearest.index;
@@ -417,6 +419,8 @@ function isMatchNegated(
   if (afterNegations.length) {
     const nearest =
       afterNegations[0];
+
+    if (!nearest) return false;
 
     const absoluteNegationStart =
       matchEnd +

@@ -310,9 +310,9 @@ export function safetyScreen(
       question: "",
       answer: a.answer,
     })),
-    age: input.age,
-    duration: input.duration,
-    language: input.language,
+    ...(input.age !== undefined ? { age: input.age } : {}),
+    ...(input.duration !== undefined ? { duration: input.duration } : {}),
+    ...(input.language !== undefined ? { language: input.language } : {}),
   });
 
   const reportedText = patientReportedText(input);
@@ -1125,10 +1125,10 @@ export const assessSymptoms = createServerFn({
 
     const system = assessmentSystemPrompt({
       language: data.language,
-      age: data.age,
-      sex: data.sex,
       redFlagCheck: safety,
       worseningOverride: worsening,
+      ...(data.age !== undefined ? { age: data.age } : {}),
+      ...(data.sex !== undefined ? { sex: data.sex } : {}),
     });
 
     const raw = await callModel(
@@ -1200,10 +1200,10 @@ export const assessPatientSymptoms =
 
       const safetyInput: SafetyInput = {
         symptoms: data.symptoms,
-        duration: data.duration,
-        age: profile.age ?? undefined,
         language: data.language,
         answers: data.answers,
+        ...(data.duration !== undefined ? { duration: data.duration } : {}),
+        ...(profile.age !== null ? { age: profile.age } : {}),
       };
 
       const safety =
@@ -1226,19 +1226,17 @@ export const assessPatientSymptoms =
       const system =
         assessmentSystemPrompt({
           language: data.language,
-          age: profile.age ?? undefined,
-          sex: profile.sex ?? undefined,
-          pregnancy:
-            profile.sex === "Female"
-              ? profile.pregnancy_status ??
-                undefined
-              : undefined,
           redFlagCheck: safety,
           worseningOverride: worsening,
           profileContext:
             buildPatientProfileContext(
               profile,
             ),
+          ...(profile.age !== null ? { age: profile.age } : {}),
+          ...(profile.sex !== null ? { sex: profile.sex } : {}),
+          ...(profile.sex === "Female" && profile.pregnancy_status !== null
+            ? { pregnancy: profile.pregnancy_status }
+            : {}),
         });
 
       const raw = await callModel(
@@ -1306,10 +1304,10 @@ export const clarifyAnswers = createServerFn({
 
     const system = assessmentSystemPrompt({
       language: data.language,
-      age: data.age,
-      sex: data.sex,
       redFlagCheck: safety,
       worseningOverride: worsening,
+      ...(data.age !== undefined ? { age: data.age } : {}),
+      ...(data.sex !== undefined ? { sex: data.sex } : {}),
     });
 
     const raw = await callModel(

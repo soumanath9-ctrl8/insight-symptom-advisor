@@ -235,7 +235,7 @@ function PatientsPage() {
         return updatePatientProfile({
           data: {
             id: editingPatient.id,
-            ...payload,
+            profile: payload,
           },
         });
       }
@@ -1077,7 +1077,7 @@ function PatientCard({
             asChild
           >
             <Link
-              to="/patient-history/$patientId"
+              to="/patient-checker/$patientId"
               params={{
                 patientId: patient.id,
               }}
