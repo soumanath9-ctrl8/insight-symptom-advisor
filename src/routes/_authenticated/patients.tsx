@@ -3,12 +3,15 @@ import {
   Link,
   useNavigate,
 } from "@tanstack/react-router";
+
 import {
   useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+
 import { useMemo, useState } from "react";
+
 import {
   ArrowRight,
   CheckCircle2,
@@ -36,6 +39,7 @@ import type {
 } from "@/lib/profile.types";
 
 import { Button } from "@/components/ui/button";
+
 import {
   Card,
   CardContent,
@@ -48,9 +52,17 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 
+/* ================================================================
+   ROUTE
+================================================================ */
+
 export const Route = createFileRoute("/_authenticated/patients")({
   component: PatientsPage,
 });
+
+/* ================================================================
+   TYPES
+================================================================ */
 
 type PatientForm = {
   name: string;
@@ -66,6 +78,10 @@ type PatientForm = {
   pregnancyStatus: YesNo | "";
 };
 
+/* ================================================================
+   EMPTY FORM
+================================================================ */
+
 const EMPTY_FORM: PatientForm = {
   name: "",
   age: "",
@@ -80,11 +96,16 @@ const EMPTY_FORM: PatientForm = {
   pregnancyStatus: "",
 };
 
+/* ================================================================
+   MAIN PAGE
+================================================================ */
+
 function PatientsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const [showForm, setShowForm] = useState(false);
+
   const [editingPatient, setEditingPatient] =
     useState<PatientProfile | null>(null);
 
@@ -97,6 +118,10 @@ function PatientsPage() {
   const [deleteError, setDeleteError] =
     useState<string | null>(null);
 
+  /* ==============================================================
+     LOAD PATIENT PROFILES
+  ============================================================== */
+
   const patientsQuery = useQuery({
     queryKey: ["patient-profiles"],
     queryFn: () => listPatientProfiles(),
@@ -104,9 +129,17 @@ function PatientsPage() {
 
   const patients = patientsQuery.data ?? [];
 
+  /* ==============================================================
+     FORM TITLE
+  ============================================================== */
+
   const formTitle = editingPatient
     ? "Edit Patient Profile"
     : "Create Patient Profile";
+
+  /* ==============================================================
+     UPDATE FORM FIELD
+  ============================================================== */
 
   function updateField<K extends keyof PatientForm>(
     key: K,
@@ -118,12 +151,20 @@ function PatientsPage() {
     }));
   }
 
+  /* ==============================================================
+     OPEN CREATE FORM
+  ============================================================== */
+
   function openCreateForm() {
     setEditingPatient(null);
     setForm(EMPTY_FORM);
     setFormError(null);
     setShowForm(true);
   }
+
+  /* ==============================================================
+     OPEN EDIT FORM
+  ============================================================== */
 
   function openEditForm(patient: PatientProfile) {
     const hasPreviousIllness =
@@ -133,22 +174,31 @@ function PatientsPage() {
 
     setForm({
       name: patient.name ?? "",
+
       age: patient.age ?? "",
+
       sex: patient.sex ?? "",
+
       allergies: patient.allergies ?? "",
+
       existingConditions:
-        patient.existingConditions ??
-        "",
+        patient.existingConditions ?? "",
+
       currentMedications:
         patient.currentMedications ?? "",
+
       previousIllnessAnswer:
         hasPreviousIllness ? "Yes" : "No",
+
       previousMajorIllnesses:
         patient.previousMajorIllnesses ?? "",
+
       smokingStatus:
         patient.smokingStatus ?? "",
+
       familyHistory:
         patient.familyHistory ?? "",
+
       pregnancyStatus:
         patient.sex === "Female"
           ? patient.pregnancyStatus ?? ""
@@ -159,6 +209,10 @@ function PatientsPage() {
     setShowForm(true);
   }
 
+  /* ==============================================================
+     CLOSE FORM
+  ============================================================== */
+
   function closeForm() {
     setShowForm(false);
     setEditingPatient(null);
@@ -166,16 +220,42 @@ function PatientsPage() {
     setFormError(null);
   }
 
-  const canSubmit = useMemo(() => {
-    if (!form.name.trim()) return false;
-    if (!form.age.trim()) return false;
-    if (!form.sex) return false;
-    if (!form.allergies) return false;
-    if (!form.existingConditions) return false;
-    if (!form.smokingStatus) return false;
-    if (!form.familyHistory.trim()) return false;
+  /* ==============================================================
+     FORM VALIDATION
+  ============================================================== */
 
-    if (!form.previousIllnessAnswer) return false;
+  const canSubmit = useMemo(() => {
+    if (!form.name.trim()) {
+      return false;
+    }
+
+    if (!form.age.trim()) {
+      return false;
+    }
+
+    if (!form.sex) {
+      return false;
+    }
+
+    if (!form.allergies) {
+      return false;
+    }
+
+    if (!form.existingConditions) {
+      return false;
+    }
+
+    if (!form.smokingStatus) {
+      return false;
+    }
+
+    if (!form.familyHistory.trim()) {
+      return false;
+    }
+
+    if (!form.previousIllnessAnswer) {
+      return false;
+    }
 
     if (
       form.previousIllnessAnswer === "Yes" &&
@@ -194,6 +274,10 @@ function PatientsPage() {
     return true;
   }, [form]);
 
+  /* ==============================================================
+     SAVE PATIENT PROFILE
+  ============================================================== */
+
   const saveMutation = useMutation({
     mutationFn: async () => {
       setFormError(null);
@@ -206,11 +290,16 @@ function PatientsPage() {
 
       const payload = {
         name: form.name.trim(),
+
         age: form.age.trim(),
+
         sex: form.sex as Sex,
+
         allergies: form.allergies as YesNo,
+
         existingConditions:
           form.existingConditions as ExistingCondition,
+
         currentMedications:
           form.currentMedications.trim(),
 
@@ -231,6 +320,10 @@ function PatientsPage() {
             : "",
       };
 
+      /* ------------------------------------------------------------
+         UPDATE EXISTING PATIENT
+      ------------------------------------------------------------ */
+
       if (editingPatient) {
         return updatePatientProfile({
           data: {
@@ -239,6 +332,10 @@ function PatientsPage() {
           },
         });
       }
+
+      /* ------------------------------------------------------------
+         CREATE NEW PATIENT
+      ------------------------------------------------------------ */
 
       return createPatientProfile({
         data: payload,
@@ -261,6 +358,10 @@ function PatientsPage() {
       );
     },
   });
+
+  /* ==============================================================
+     DELETE PATIENT PROFILE
+  ============================================================== */
 
   const deleteMutation = useMutation({
     mutationFn: async (patientId: string) => {
@@ -290,6 +391,10 @@ function PatientsPage() {
     },
   });
 
+  /* ==============================================================
+     DELETE HANDLER
+  ============================================================== */
+
   function handleDelete(patient: PatientProfile) {
     const confirmed = window.confirm(
       `Delete the profile for ${patient.name}? This will also remove access to this patient's stored symptom history from your account.`,
@@ -302,6 +407,10 @@ function PatientsPage() {
     deleteMutation.mutate(patient.id);
   }
 
+  /* ==============================================================
+     LOADING STATE
+  ============================================================== */
+
   if (patientsQuery.isLoading) {
     return (
       <main className="min-h-screen px-4 py-8">
@@ -311,6 +420,10 @@ function PatientsPage() {
       </main>
     );
   }
+
+  /* ==============================================================
+     ERROR STATE
+  ============================================================== */
 
   if (patientsQuery.error) {
     return (
@@ -323,8 +436,8 @@ function PatientsPage() {
               </CardTitle>
 
               <CardDescription>
-                We could not load the patient profiles associated
-                with your account.
+                We could not load the patient profiles
+                associated with your account.
               </CardDescription>
             </CardHeader>
 
@@ -343,6 +456,10 @@ function PatientsPage() {
     );
   }
 
+  /* ==============================================================
+     MAIN UI
+  ============================================================== */
+
   return (
     <main className="min-h-screen bg-background px-4 py-6 sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-5xl">
@@ -350,6 +467,7 @@ function PatientsPage() {
         {/* ======================================================
             HEADER
         ======================================================= */}
+
         <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <Link
@@ -357,6 +475,7 @@ function PatientsPage() {
               className="mb-3 inline-flex items-center text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowRight className="mr-2 size-4 rotate-180" />
+
               Back to Home
             </Link>
 
@@ -380,6 +499,7 @@ function PatientsPage() {
 
           <Button onClick={openCreateForm}>
             <Plus className="mr-2 size-4" />
+
             Add Patient
           </Button>
         </header>
@@ -387,6 +507,7 @@ function PatientsPage() {
         {/* ======================================================
             IMPORTANT SEPARATION NOTICE
         ======================================================= */}
+
         <Card className="mb-6 border-border/70 bg-muted/20">
           <CardContent className="p-5">
             <div className="flex items-start gap-3">
@@ -408,6 +529,10 @@ function PatientsPage() {
           </CardContent>
         </Card>
 
+        {/* ======================================================
+            DELETE ERROR
+        ======================================================= */}
+
         {deleteError && (
           <div className="mb-6 rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
             {deleteError}
@@ -417,6 +542,7 @@ function PatientsPage() {
         {/* ======================================================
             CREATE / EDIT FORM
         ======================================================= */}
+
         {showForm && (
           <PatientProfileForm
             title={formTitle}
@@ -436,6 +562,7 @@ function PatientsPage() {
         {/* ======================================================
             PATIENT LIST
         ======================================================= */}
+
         <section className={showForm ? "mt-8" : ""}>
           {patients.length === 0 ? (
             <Card>
@@ -458,6 +585,7 @@ function PatientsPage() {
                   onClick={openCreateForm}
                 >
                   <Plus className="mr-2 size-4" />
+
                   Create First Patient
                 </Button>
               </CardContent>
@@ -513,16 +641,24 @@ function PatientProfileForm({
   onCancel,
 }: {
   title: string;
+
   form: PatientForm;
+
   error: string | null;
+
   saving: boolean;
+
   canSubmit: boolean;
+
   editing: boolean;
+
   onChange: <K extends keyof PatientForm>(
     key: K,
     value: PatientForm[K],
   ) => void;
+
   onSubmit: () => void;
+
   onCancel: () => void;
 }) {
   return (
@@ -530,7 +666,9 @@ function PatientProfileForm({
       <CardHeader>
         <div className="flex items-start justify-between gap-4">
           <div>
-            <CardTitle>{title}</CardTitle>
+            <CardTitle>
+              {title}
+            </CardTitle>
 
             <CardDescription className="mt-1">
               Enter the patient's background information
@@ -553,13 +691,18 @@ function PatientProfileForm({
       <CardContent>
         <div className="grid gap-6">
 
-          {/* BASIC INFORMATION */}
+          {/* ====================================================
+              BASIC INFORMATION
+          ===================================================== */}
+
           <section>
             <h2 className="mb-4 text-base font-semibold">
               Basic Information
             </h2>
 
             <div className="grid gap-4 sm:grid-cols-2">
+
+              {/* NAME */}
 
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="patient-name">
@@ -578,6 +721,8 @@ function PatientProfileForm({
                   placeholder="Patient's full name"
                 />
               </div>
+
+              {/* AGE */}
 
               <div className="space-y-2">
                 <Label htmlFor="patient-age">
@@ -600,6 +745,8 @@ function PatientProfileForm({
                 />
               </div>
 
+              {/* SEX */}
+
               <div className="space-y-2">
                 <Label htmlFor="patient-sex">
                   Sex <Required />
@@ -610,9 +757,23 @@ function PatientProfileForm({
                   value={form.sex}
                   onChange={(event) => {
                     const value =
-                      event.target.value as Sex | "";
+                      event.target.value as
+                        | Sex
+                        | "";
 
-                    onChange("sex", value);
+                    onChange(
+                      "sex",
+                      value,
+                    );
+
+                    /*
+                     * Pregnancy status is only relevant
+                     * for Female patients.
+                     *
+                     * If sex changes to Male, remove
+                     * any previously selected pregnancy
+                     * value from the local form.
+                     */
 
                     if (value !== "Female") {
                       onChange(
@@ -639,13 +800,18 @@ function PatientProfileForm({
             </div>
           </section>
 
-          {/* HEALTH BACKGROUND */}
+          {/* ====================================================
+              HEALTH BACKGROUND
+          ===================================================== */}
+
           <section>
             <h2 className="mb-4 text-base font-semibold">
               Health Background
             </h2>
 
             <div className="grid gap-4 sm:grid-cols-2">
+
+              {/* ALLERGIES */}
 
               <div className="space-y-2">
                 <Label htmlFor="patient-allergies">
@@ -658,7 +824,9 @@ function PatientProfileForm({
                   onChange={(event) =>
                     onChange(
                       "allergies",
-                      event.target.value as YesNo | "",
+                      event.target.value as
+                        | YesNo
+                        | "",
                     )
                   }
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
@@ -677,6 +845,8 @@ function PatientProfileForm({
                 </select>
               </div>
 
+              {/* EXISTING CONDITIONS */}
+
               <div className="space-y-2">
                 <Label htmlFor="patient-condition">
                   Existing Conditions <Required />
@@ -688,8 +858,9 @@ function PatientProfileForm({
                   onChange={(event) =>
                     onChange(
                       "existingConditions",
-                      event.target
-                        .value as ExistingCondition | "",
+                      event.target.value as
+                        | ExistingCondition
+                        | "",
                     )
                   }
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
@@ -720,6 +891,8 @@ function PatientProfileForm({
                 </select>
               </div>
 
+              {/* CURRENT MEDICATIONS */}
+
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="patient-medications">
                   Current Medications
@@ -744,6 +917,8 @@ function PatientProfileForm({
                 </p>
               </div>
 
+              {/* PREVIOUS MAJOR ILLNESSES */}
+
               <div className="space-y-2">
                 <Label htmlFor="patient-previous-illness">
                   Previous Major Illnesses <Required />
@@ -754,7 +929,9 @@ function PatientProfileForm({
                   value={form.previousIllnessAnswer}
                   onChange={(event) => {
                     const value =
-                      event.target.value as YesNo | "";
+                      event.target.value as
+                        | YesNo
+                        | "";
 
                     onChange(
                       "previousIllnessAnswer",
@@ -784,6 +961,8 @@ function PatientProfileForm({
                 </select>
               </div>
 
+              {/* SMOKING STATUS */}
+
               <div className="space-y-2">
                 <Label htmlFor="patient-smoking">
                   Smoking Status <Required />
@@ -795,7 +974,9 @@ function PatientProfileForm({
                   onChange={(event) =>
                     onChange(
                       "smokingStatus",
-                      event.target.value as YesNo | "",
+                      event.target.value as
+                        | YesNo
+                        | "",
                     )
                   }
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
@@ -814,7 +995,10 @@ function PatientProfileForm({
                 </select>
               </div>
 
-              {form.previousIllnessAnswer === "Yes" && (
+              {/* PREVIOUS ILLNESS DETAILS */}
+
+              {form.previousIllnessAnswer ===
+                "Yes" && (
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="patient-illness-details">
                     Which major illness? <Required />
@@ -837,6 +1021,8 @@ function PatientProfileForm({
                 </div>
               )}
 
+              {/* FAMILY HISTORY */}
+
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="patient-family-history">
                   Relevant Family History <Required />
@@ -858,7 +1044,10 @@ function PatientProfileForm({
             </div>
           </section>
 
-          {/* PREGNANCY */}
+          {/* ====================================================
+              PREGNANCY
+          ===================================================== */}
+
           {form.sex === "Female" && (
             <section>
               <h2 className="mb-4 text-base font-semibold">
@@ -876,7 +1065,9 @@ function PatientProfileForm({
                   onChange={(event) =>
                     onChange(
                       "pregnancyStatus",
-                      event.target.value as YesNo | "",
+                      event.target.value as
+                        | YesNo
+                        | "",
                     )
                   }
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
@@ -897,14 +1088,20 @@ function PatientProfileForm({
             </section>
           )}
 
-          {/* FORM ERROR */}
+          {/* ====================================================
+              FORM ERROR
+          ===================================================== */}
+
           {error && (
             <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
               {error}
             </div>
           )}
 
-          {/* ACTIONS */}
+          {/* ====================================================
+              FORM ACTIONS
+          ===================================================== */}
+
           <div className="flex flex-col-reverse gap-3 border-t pt-5 sm:flex-row sm:justify-end">
             <Button
               variant="outline"
@@ -921,6 +1118,7 @@ function PatientProfileForm({
               {saving ? (
                 <>
                   <Loader2 className="mr-2 size-4 animate-spin" />
+
                   {editing
                     ? "Updating..."
                     : "Creating..."}
@@ -930,11 +1128,16 @@ function PatientProfileForm({
                   {editing
                     ? "Update Patient"
                     : "Create Patient"}
+
                   <ArrowRight className="ml-2 size-4" />
                 </>
               )}
             </Button>
           </div>
+
+          {/* ====================================================
+              FORM CONTEXT NOTE
+          ===================================================== */}
 
           <p className="text-center text-xs leading-5 text-muted-foreground">
             Patient profile information is background
@@ -959,15 +1162,24 @@ function PatientCard({
   onCheckSymptoms,
 }: {
   patient: PatientProfile;
+
   deleting: boolean;
+
   onEdit: () => void;
+
   onDelete: () => void;
+
   onCheckSymptoms: () => void;
 }) {
   return (
     <Card className="overflow-hidden border-border/70 shadow-sm transition-shadow hover:shadow-md">
       <CardHeader>
         <div className="flex items-start justify-between gap-4">
+
+          {/* ====================================================
+              PATIENT IDENTITY
+          ===================================================== */}
+
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <UserRound className="size-5" />
@@ -985,6 +1197,10 @@ function PatientCard({
               </CardDescription>
             </div>
           </div>
+
+          {/* ====================================================
+              EDIT / DELETE
+          ===================================================== */}
 
           <div className="flex shrink-0 gap-1">
             <Button
@@ -1017,11 +1233,18 @@ function PatientCard({
       </CardHeader>
 
       <CardContent className="space-y-4">
-        <div className="grid gap-3 sm:grid-cols-2">
 
+        {/* ======================================================
+            PATIENT BACKGROUND SUMMARY
+        ======================================================= */}
+
+        <div className="grid gap-3 sm:grid-cols-2">
           <InfoItem
             label="Allergies"
-            value={patient.allergies || "Not provided"}
+            value={
+              patient.allergies ||
+              "Not provided"
+            }
           />
 
           <InfoItem
@@ -1051,6 +1274,10 @@ function PatientCard({
           />
         </div>
 
+        {/* ======================================================
+            SEPARATION NOTICE
+        ======================================================= */}
+
         <div className="rounded-xl border bg-muted/20 p-4">
           <p className="text-xs font-medium text-muted-foreground">
             Separate patient record
@@ -1062,14 +1289,33 @@ function PatientCard({
           </p>
         </div>
 
+        {/* ======================================================
+            ACTIONS
+        ======================================================= */}
+
         <div className="grid gap-2 sm:grid-cols-2">
+
+          {/* ----------------------------------------------------
+              CHECK SYMPTOMS
+              Correct route:
+              /patient-checker/$patient_ID
+          ----------------------------------------------------- */}
+
           <Button
             className="w-full"
             onClick={onCheckSymptoms}
           >
             Check Symptoms
+
             <ArrowRight className="ml-2 size-4" />
           </Button>
+
+          {/* ----------------------------------------------------
+              VIEW HISTORY
+              IMPORTANT:
+              This MUST point to patient-history,
+              NOT patient-checker.
+          ----------------------------------------------------- */}
 
           <Button
             variant="outline"
@@ -1077,7 +1323,7 @@ function PatientCard({
             asChild
           >
             <Link
-              to="/patient-checker/$patient_ID"
+              to="/patient-history/$patient_ID"
               params={{
                 patient_ID: patient.id,
               }}
@@ -1092,7 +1338,7 @@ function PatientCard({
 }
 
 /* ================================================================
-   SMALL HELPERS
+   SMALL INFO ITEM
 ================================================================ */
 
 function InfoItem({
@@ -1114,6 +1360,10 @@ function InfoItem({
     </div>
   );
 }
+
+/* ================================================================
+   REQUIRED FIELD MARKER
+================================================================ */
 
 function Required() {
   return (
