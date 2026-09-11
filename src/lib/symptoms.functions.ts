@@ -440,4 +440,12 @@ export const clarifyAnswers = createServerFn({ method: "POST" })
     return { question: parsed.question, why: parsed.why, options: parsed.options };
   });
 
+const ContextInput = z.object({
+  symptoms: z.string().min(3).max(2000),
+  age: z.string().max(10).optional(),
+  sex: z.string().max(20).optional(),
+  duration: z.string().max(60).optional(),
+  severity: z.number().min(1).max(10).optional(),
+  language: z.enum(["en", "bn"]).default("en"),
+});
 
