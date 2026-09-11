@@ -2,13 +2,21 @@ import {
   createFileRoute,
   Link,
 } from "@tanstack/react-router";
+
 import {
   useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+
 import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
+import {
+  Activity,
   ArrowLeft,
   CheckCircle2,
   Loader2,
@@ -20,6 +28,10 @@ import {
   getOwnProfile,
   updateOwnProfile,
 } from "@/lib/profile.functions";
+
+import {
+  listChecks,
+} from "@/lib/history.functions";
 
 import type {
   ExistingCondition,
@@ -76,42 +88,109 @@ const EMPTY_FORM: ProfileForm = {
   pregnancyStatus: "",
 };
 
+/* -------------------------------------------------------------------------- */
+/*                              History types                                 */
+/* -------------------------------------------------------------------------- */
+
+type HistoryItem = {
+  id: string;
+  date: string;
+  symptoms: string;
+  severity: number;
+  urgency: string;
+  topCondition: string;
+  summary: string;
+};
+
+/* -------------------------------------------------------------------------- */
+/*                              Main page                                     */
+/* -------------------------------------------------------------------------- */
+
 function ProfilePage() {
-  const queryClient = useQueryClient();
+  const queryClient =
+    useQueryClient();
 
   const [form, setForm] =
-    useState<ProfileForm>(EMPTY_FORM);
+    useState<ProfileForm>(
+      EMPTY_FORM,
+    );
 
   const [formError, setFormError] =
-    useState<string | null>(null);
+    useState<string | null>(
+      null,
+    );
 
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] =
+    useState(false);
 
-  const profileQuery = useQuery({
-    queryKey: ["own-profile"],
-    queryFn: () => getOwnProfile(),
-  });
+  /* ---------------------------------------------------------------------- */
+  /*                           Own profile                                  */
+  /* ---------------------------------------------------------------------- */
+
+  const profileQuery =
+    useQuery({
+      queryKey: ["own-profile"],
+      queryFn: () =>
+        getOwnProfile(),
+    });
+
+  /* ---------------------------------------------------------------------- */
+  /*                     OWN HISTORY ONLY                                   */
+  /* ---------------------------------------------------------------------- */
 
   /**
-   * Populate the form once the authenticated
-   * user's own profile has loaded.
+   * IMPORTANT:
    *
-   * This page NEVER loads patient_profiles.
+   * This query intentionally uses listChecks().
+   *
+   * listChecks() is the SELF history function.
+   *
+   * We do NOT call listPatientChecks() here.
+   *
+   * Therefore patient histories can never appear
+   * inside the user's own profile graph.
    */
+  const historyQuery =
+    useQuery({
+      queryKey: ["checks"],
+      queryFn: async () => {
+        const result =
+          await listChecks();
+
+        return (
+          result as HistoryItem[]
+        );
+      },
+    });
+
+  /* ---------------------------------------------------------------------- */
+  /*                        Populate form                                   */
+  /* ---------------------------------------------------------------------- */
+
   useEffect(() => {
-    const profile = profileQuery.data;
+    const profile =
+      profileQuery.data;
 
     if (!profile) {
       return;
     }
 
     setForm({
-      name: profile.name ?? "",
-      age: profile.age ?? "",
-      sex: profile.sex ?? "",
-      allergies: profile.allergies ?? "",
+      name:
+        profile.name ?? "",
+
+      age:
+        profile.age ?? "",
+
+      sex:
+        profile.sex ?? "",
+
+      allergies:
+        profile.allergies ?? "",
+
       existingConditions:
         profile.existingConditions ?? "",
+
       currentMedications:
         profile.currentMedications ?? "",
 
@@ -134,9 +213,17 @@ function ProfilePage() {
           ? profile.pregnancyStatus ?? ""
           : "",
     });
-  }, [profileQuery.data]);
+  }, [
+    profileQuery.data,
+  ]);
 
-  function updateField<K extends keyof ProfileForm>(
+  /* ---------------------------------------------------------------------- */
+  /*                         Form update                                    */
+  /* ---------------------------------------------------------------------- */
+
+  function updateField<
+    K extends keyof ProfileForm,
+  >(
     field: K,
     value: ProfileForm[K],
   ) {
@@ -149,153 +236,194 @@ function ProfilePage() {
     }));
   }
 
-  /**
-   * Required-field validation.
-   */
-  const missingFields = useMemo(() => {
-    const missing: string[] = [];
+  /* ---------------------------------------------------------------------- */
+  /*                         Validation                                     */
+  /* ---------------------------------------------------------------------- */
 
-    if (!form.name.trim()) {
-      missing.push("Name");
-    }
+  const missingFields =
+    useMemo(() => {
+      const missing: string[] =
+        [];
 
-    if (!form.age.trim()) {
-      missing.push("Age");
-    }
+      if (!form.name.trim()) {
+        missing.push("Name");
+      }
 
-    if (!form.sex) {
-      missing.push("Sex");
-    }
+      if (!form.age.trim()) {
+        missing.push("Age");
+      }
 
-    if (!form.allergies) {
-      missing.push("Allergies");
-    }
+      if (!form.sex) {
+        missing.push("Sex");
+      }
 
-    if (!form.existingConditions) {
-      missing.push("Existing conditions");
-    }
+      if (!form.allergies) {
+        missing.push("Allergies");
+      }
 
-    if (!form.smokingStatus) {
-      missing.push("Smoking status");
-    }
+      if (
+        !form.existingConditions
+      ) {
+        missing.push(
+          "Existing conditions",
+        );
+      }
 
-    if (!form.familyHistory.trim()) {
-      missing.push("Relevant family history");
-    }
+      if (!form.smokingStatus) {
+        missing.push(
+          "Smoking status",
+        );
+      }
 
-    if (!form.previousIllnessAnswer) {
-      missing.push("Previous major illnesses");
-    }
+      if (
+        !form.familyHistory.trim()
+      ) {
+        missing.push(
+          "Relevant family history",
+        );
+      }
 
-    if (
-      form.previousIllnessAnswer === "Yes" &&
-      !form.previousMajorIllnesses.trim()
-    ) {
-      missing.push("Previous major illness details");
-    }
+      if (
+        !form.previousIllnessAnswer
+      ) {
+        missing.push(
+          "Previous major illnesses",
+        );
+      }
 
-    if (
-      form.sex === "Female" &&
-      !form.pregnancyStatus
-    ) {
-      missing.push("Pregnancy status");
-    }
+      if (
+        form.previousIllnessAnswer ===
+          "Yes" &&
+        !form.previousMajorIllnesses.trim()
+      ) {
+        missing.push(
+          "Previous major illness details",
+        );
+      }
 
-    return missing;
-  }, [form]);
+      if (
+        form.sex === "Female" &&
+        !form.pregnancyStatus
+      ) {
+        missing.push(
+          "Pregnancy status",
+        );
+      }
+
+      return missing;
+    }, [form]);
 
   const canSave =
     missingFields.length === 0;
 
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      if (!canSave) {
-        throw new Error(
-          "Please complete all required fields.",
-        );
-      }
+  /* ---------------------------------------------------------------------- */
+  /*                           Save mutation                                */
+  /* ---------------------------------------------------------------------- */
 
-      const ageNumber = Number(form.age);
+  const saveMutation =
+    useMutation({
+      mutationFn: async () => {
+        if (!canSave) {
+          throw new Error(
+            "Please complete all required fields.",
+          );
+        }
 
-      if (
-        !Number.isFinite(ageNumber) ||
-        ageNumber < 0 ||
-        ageNumber > 120
-      ) {
-        throw new Error(
-          "Please enter a valid age between 0 and 120.",
-        );
-      }
+        const ageNumber =
+          Number(form.age);
 
-      return updateOwnProfile({
-        data: {
-          name: form.name.trim(),
+        if (
+          !Number.isFinite(
+            ageNumber,
+          ) ||
+          ageNumber < 0 ||
+          ageNumber > 120
+        ) {
+          throw new Error(
+            "Please enter a valid age between 0 and 120.",
+          );
+        }
 
-          age: form.age.trim(),
+        return updateOwnProfile({
+          data: {
+            name:
+              form.name.trim(),
 
-          sex: form.sex as Sex,
+            age:
+              form.age.trim(),
 
-          allergies:
-            form.allergies as YesNo,
+            sex:
+              form.sex as Sex,
 
-          existingConditions:
-            form.existingConditions as ExistingCondition,
+            allergies:
+              form.allergies as YesNo,
 
-          currentMedications:
-            form.currentMedications.trim(),
+            existingConditions:
+              form.existingConditions as ExistingCondition,
 
-          previousMajorIllnesses:
-            form.previousIllnessAnswer === "Yes"
-              ? form.previousMajorIllnesses.trim()
-              : "",
+            currentMedications:
+              form.currentMedications.trim(),
 
-          smokingStatus:
-            form.smokingStatus as YesNo,
+            previousMajorIllnesses:
+              form.previousIllnessAnswer ===
+              "Yes"
+                ? form.previousMajorIllnesses.trim()
+                : "",
 
-          familyHistory:
-            form.familyHistory.trim(),
+            smokingStatus:
+              form.smokingStatus as YesNo,
 
-          pregnancyStatus:
-            form.sex === "Female"
-              ? (form.pregnancyStatus as YesNo)
-              : "",
+            familyHistory:
+              form.familyHistory.trim(),
+
+            pregnancyStatus:
+              form.sex === "Female"
+                ? (form.pregnancyStatus as YesNo)
+                : "",
+          },
+        });
+      },
+
+      onSuccess:
+        (
+          updatedProfile,
+        ) => {
+          queryClient.setQueryData(
+            ["own-profile"],
+            updatedProfile,
+          );
+
+          queryClient.invalidateQueries({
+            queryKey: ["profile"],
+          });
+
+          queryClient.invalidateQueries({
+            queryKey: ["own-profile"],
+          });
+
+          setSaved(true);
+          setFormError(null);
         },
-      });
-    },
 
-    onSuccess: (updatedProfile) => {
-      /**
-       * Keep the React Query cache synchronized.
-       */
-      queryClient.setQueryData(
-        ["own-profile"],
-        updatedProfile,
-      );
+      onError:
+        (error) => {
+          setSaved(false);
 
-      queryClient.invalidateQueries({
-        queryKey: ["profile"],
-      });
+          setFormError(
+            error instanceof Error
+              ? error.message
+              : "Unable to save your profile.",
+          );
+        },
+    });
 
-      queryClient.invalidateQueries({
-        queryKey: ["own-profile"],
-      });
+  /* ---------------------------------------------------------------------- */
+  /*                             Loading                                    */
+  /* ---------------------------------------------------------------------- */
 
-      setSaved(true);
-      setFormError(null);
-    },
-
-    onError: (error) => {
-      setSaved(false);
-
-      setFormError(
-        error instanceof Error
-          ? error.message
-          : "Unable to save your profile.",
-      );
-    },
-  });
-
-  if (profileQuery.isLoading) {
+  if (
+    profileQuery.isLoading
+  ) {
     return (
       <main className="min-h-screen bg-background px-4 py-8">
         <div className="mx-auto flex max-w-3xl items-center justify-center py-24">
@@ -308,6 +436,10 @@ function ProfilePage() {
     );
   }
 
+  /* ---------------------------------------------------------------------- */
+  /*                              Error                                     */
+  /* ---------------------------------------------------------------------- */
+
   if (profileQuery.error) {
     return (
       <main className="min-h-screen bg-background px-4 py-8">
@@ -319,8 +451,8 @@ function ProfilePage() {
               </CardTitle>
 
               <CardDescription>
-                We could not load your saved profile
-                information.
+                We could not load your saved
+                profile information.
               </CardDescription>
             </CardHeader>
 
@@ -339,13 +471,18 @@ function ProfilePage() {
     );
   }
 
+  /* ---------------------------------------------------------------------- */
+  /*                              Render                                    */
+  /* ---------------------------------------------------------------------- */
+
   return (
     <main className="min-h-screen bg-background px-4 py-6 sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-3xl">
 
-        {/* =====================================================
+        {/* ================================================================
             HEADER
-        ====================================================== */}
+        ================================================================= */}
+
         <header className="mb-6">
           <Link
             to="/home"
@@ -366,16 +503,17 @@ function ProfilePage() {
               </h1>
 
               <p className="mt-1 text-sm text-muted-foreground">
-                Manage the profile information used for
-                your own symptom assessments.
+                Manage the profile information used
+                for your own symptom assessments.
               </p>
             </div>
           </div>
         </header>
 
-        {/* =====================================================
+        {/* ================================================================
             SEPARATION NOTICE
-        ====================================================== */}
+        ================================================================= */}
+
         <Card className="mb-6 border-border/70 bg-muted/20">
           <CardContent className="p-5">
             <div className="flex items-start gap-3">
@@ -387,19 +525,39 @@ function ProfilePage() {
                 </p>
 
                 <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                  Information saved here is used for your
-                  own symptom checks. Profiles and histories
-                  created for other patients are kept
-                  separately.
+                  Information saved here is used for
+                  your own symptom checks. Profiles and
+                  histories created for other patients
+                  are kept separately.
                 </p>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* =====================================================
+        {/* ================================================================
+            OWN HISTORY GRAPH
+        ================================================================= */}
+
+        <OwnHistoryGraph
+          history={
+            historyQuery.data ?? []
+          }
+          isLoading={
+            historyQuery.isLoading
+          }
+          error={
+            historyQuery.error
+          }
+          onRetry={() =>
+            historyQuery.refetch()
+          }
+        />
+
+        {/* ================================================================
             PROFILE FORM
-        ====================================================== */}
+        ================================================================= */}
+
         <Card>
           <CardHeader>
             <CardTitle>
@@ -407,19 +565,20 @@ function ProfilePage() {
             </CardTitle>
 
             <CardDescription>
-              Please provide accurate background information.
-              These details provide context for your symptom
-              assessment and are not automatically treated as
-              current symptoms.
+              Please provide accurate background
+              information. These details provide context
+              for your symptom assessment and are not
+              automatically treated as current symptoms.
             </CardDescription>
           </CardHeader>
 
           <CardContent>
             <div className="space-y-8">
 
-              {/* =================================================
+              {/* ==========================================================
                   BASIC INFORMATION
-              ================================================== */}
+              =========================================================== */}
+
               <section>
                 <h2 className="text-base font-semibold">
                   Basic Information
@@ -432,6 +591,7 @@ function ProfilePage() {
                 <div className="mt-5 grid gap-5 sm:grid-cols-2">
 
                   {/* NAME */}
+
                   <div className="space-y-2 sm:col-span-2">
                     <Label htmlFor="profile-name">
                       Name <Required />
@@ -452,6 +612,7 @@ function ProfilePage() {
                   </div>
 
                   {/* AGE */}
+
                   <div className="space-y-2">
                     <Label htmlFor="profile-age">
                       Age <Required />
@@ -475,6 +636,7 @@ function ProfilePage() {
                   </div>
 
                   {/* SEX */}
+
                   <div className="space-y-2">
                     <Label htmlFor="profile-sex">
                       Sex <Required />
@@ -494,11 +656,10 @@ function ProfilePage() {
                           value,
                         );
 
-                        /**
-                         * Pregnancy is applicable only
-                         * when Sex = Female.
-                         */
-                        if (value !== "Female") {
+                        if (
+                          value !==
+                          "Female"
+                        ) {
                           updateField(
                             "pregnancyStatus",
                             "",
@@ -525,22 +686,24 @@ function ProfilePage() {
 
               <Separator />
 
-              {/* =================================================
+              {/* ==========================================================
                   HEALTH BACKGROUND
-              ================================================== */}
+              =========================================================== */}
+
               <section>
                 <h2 className="text-base font-semibold">
                   Health Background
                 </h2>
 
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Background information that may be relevant
-                  during symptom assessment.
+                  Background information that may be
+                  relevant during symptom assessment.
                 </p>
 
                 <div className="mt-5 grid gap-5 sm:grid-cols-2">
 
                   {/* ALLERGIES */}
+
                   <div className="space-y-2">
                     <Label htmlFor="profile-allergies">
                       Allergies <Required />
@@ -574,9 +737,11 @@ function ProfilePage() {
                   </div>
 
                   {/* EXISTING CONDITIONS */}
+
                   <div className="space-y-2">
                     <Label htmlFor="profile-condition">
-                      Existing Conditions <Required />
+                      Existing Conditions{" "}
+                      <Required />
                     </Label>
 
                     <select
@@ -621,6 +786,7 @@ function ProfilePage() {
                   </div>
 
                   {/* CURRENT MEDICATIONS */}
+
                   <div className="space-y-2 sm:col-span-2">
                     <Label htmlFor="profile-medications">
                       Current Medications
@@ -642,13 +808,14 @@ function ProfilePage() {
                     />
 
                     <p className="text-xs leading-5 text-muted-foreground">
-                      Never stop, start or change a prescribed
-                      medicine solely because of an app
-                      assessment.
+                      Never stop, start or change a
+                      prescribed medicine solely because
+                      of an app assessment.
                     </p>
                   </div>
 
-                  {/* PREVIOUS ILLNESS YES/NO */}
+                  {/* PREVIOUS ILLNESS */}
+
                   <div className="space-y-2">
                     <Label htmlFor="profile-previous-illness">
                       Previous Major Illnesses{" "}
@@ -671,7 +838,10 @@ function ProfilePage() {
                           value,
                         );
 
-                        if (value === "No") {
+                        if (
+                          value ===
+                          "No"
+                        ) {
                           updateField(
                             "previousMajorIllnesses",
                             "",
@@ -695,6 +865,7 @@ function ProfilePage() {
                   </div>
 
                   {/* SMOKING */}
+
                   <div className="space-y-2">
                     <Label htmlFor="profile-smoking">
                       Smoking Status <Required />
@@ -702,7 +873,9 @@ function ProfilePage() {
 
                     <select
                       id="profile-smoking"
-                      value={form.smokingStatus}
+                      value={
+                        form.smokingStatus
+                      }
                       onChange={(event) =>
                         updateField(
                           "smokingStatus",
@@ -728,6 +901,7 @@ function ProfilePage() {
                   </div>
 
                   {/* PREVIOUS ILLNESS DETAILS */}
+
                   {form.previousIllnessAnswer ===
                     "Yes" && (
                     <div className="space-y-2 sm:col-span-2">
@@ -754,6 +928,7 @@ function ProfilePage() {
                   )}
 
                   {/* FAMILY HISTORY */}
+
                   <div className="space-y-2 sm:col-span-2">
                     <Label htmlFor="profile-family-history">
                       Relevant Family History{" "}
@@ -762,7 +937,9 @@ function ProfilePage() {
 
                     <Textarea
                       id="profile-family-history"
-                      value={form.familyHistory}
+                      value={
+                        form.familyHistory
+                      }
                       onChange={(event) =>
                         updateField(
                           "familyHistory",
@@ -774,17 +951,20 @@ function ProfilePage() {
                     />
 
                     <p className="text-xs text-muted-foreground">
-                      If there is no relevant family history,
-                      you can write "None known".
+                      If there is no relevant family
+                      history, you can write
+                      "None known".
                     </p>
                   </div>
                 </div>
               </section>
 
-              {/* =================================================
-                  PREGNANCY — FEMALE ONLY
-              ================================================== */}
-              {form.sex === "Female" && (
+              {/* ==========================================================
+                  PREGNANCY
+              =========================================================== */}
+
+              {form.sex ===
+                "Female" && (
                 <>
                   <Separator />
 
@@ -836,25 +1016,28 @@ function ProfilePage() {
                 </>
               )}
 
-              {/* =================================================
+              {/* ==========================================================
                   VALIDATION
-              ================================================== */}
+              =========================================================== */}
+
               {!canSave && (
                 <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
                   <p className="text-sm font-medium">
-                    Please complete the required fields.
+                    Please complete the required
+                    fields.
                   </p>
 
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
                     Missing:{" "}
-                    {missingFields.join(", ")}
+                    {missingFields.join(
+                      ", ",
+                    )}
                   </p>
                 </div>
               )}
 
-              {/* =================================================
-                  ERROR
-              ================================================== */}
+              {/* ERROR */}
+
               {formError && (
                 <div
                   role="alert"
@@ -864,9 +1047,8 @@ function ProfilePage() {
                 </div>
               )}
 
-              {/* =================================================
-                  SUCCESS
-              ================================================== */}
+              {/* SUCCESS */}
+
               {saved && (
                 <div
                   role="status"
@@ -880,16 +1062,16 @@ function ProfilePage() {
                     </p>
 
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Your updated information will be used
-                      for your own future symptom assessments.
+                      Your updated information will be
+                      used for your own future symptom
+                      assessments.
                     </p>
                   </div>
                 </div>
               )}
 
-              {/* =================================================
-                  SAVE
-              ================================================== */}
+              {/* SAVE */}
+
               <div className="flex flex-col gap-3 border-t pt-6 sm:flex-row sm:justify-end">
                 <Button
                   variant="outline"
@@ -923,23 +1105,24 @@ function ProfilePage() {
                 </Button>
               </div>
 
-              {/* =================================================
-                  FOOTNOTE
-              ================================================== */}
+              {/* FOOTNOTE */}
+
               <p className="text-center text-xs leading-5 text-muted-foreground">
                 SymptomScope uses this information as
                 background context for symptom assessment.
-                It does not constitute a diagnosis or replace
-                professional medical care.
+                It does not constitute a diagnosis or
+                replace professional medical care.
               </p>
             </div>
           </CardContent>
         </Card>
 
-        {/* =====================================================
+        {/* ================================================================
             QUICK LINKS
-        ====================================================== */}
+        ================================================================= */}
+
         <div className="mt-6 grid gap-4 sm:grid-cols-2">
+
           <Link
             to="/history"
             className="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -976,7 +1159,8 @@ function ProfilePage() {
                     </p>
 
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Return to your symptom assessment options.
+                      Return to your symptom assessment
+                      options.
                     </p>
                   </div>
 
@@ -985,10 +1169,632 @@ function ProfilePage() {
               </CardContent>
             </Card>
           </Link>
+
         </div>
       </div>
     </main>
   );
+}
+
+/* ==========================================================================
+   OWN HISTORY GRAPH
+   ========================================================================== */
+
+type OwnHistoryGraphProps = {
+  history: HistoryItem[];
+  isLoading: boolean;
+  error: unknown;
+  onRetry: () => void;
+};
+
+function OwnHistoryGraph({
+  history,
+  isLoading,
+  error,
+  onRetry,
+}: OwnHistoryGraphProps) {
+  /* ---------------------------------------------------------------------- */
+  /*                    Loading state                                      */
+  /* ---------------------------------------------------------------------- */
+
+  if (isLoading) {
+    return (
+      <Card className="mb-6">
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Activity className="size-5" />
+            </div>
+
+            <div>
+              <CardTitle>
+                My Symptom History
+              </CardTitle>
+
+              <CardDescription>
+                Your own symptom match-strength trend.
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+
+        <CardContent>
+          <div className="flex min-h-[260px] items-center justify-center">
+            <Loader2
+              className="size-6 animate-spin text-muted-foreground"
+              aria-label="Loading symptom history"
+            />
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /*                         Error state                                    */
+  /* ---------------------------------------------------------------------- */
+
+  if (error) {
+    return (
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>
+            My Symptom History
+          </CardTitle>
+
+          <CardDescription>
+            We could not load your saved symptom
+            history.
+          </CardDescription>
+        </CardHeader>
+
+        <CardContent>
+          <div
+            role="alert"
+            className="rounded-xl border border-destructive/40 bg-destructive/10 p-4"
+          >
+            <p className="text-sm text-destructive">
+              Unable to load your history right now.
+            </p>
+
+            <Button
+              variant="outline"
+              className="mt-4"
+              onClick={onRetry}
+            >
+              Try Again
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /*                          Empty state                                   */
+  /* ---------------------------------------------------------------------- */
+
+  if (!history.length) {
+    return (
+      <Card className="mb-6">
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Activity className="size-5" />
+            </div>
+
+            <div>
+              <CardTitle>
+                My Symptom History
+              </CardTitle>
+
+              <CardDescription>
+                Your own symptom match-strength trend.
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+
+        <CardContent>
+          <div className="rounded-xl border border-dashed p-8 text-center">
+            <Activity className="mx-auto size-8 text-muted-foreground" />
+
+            <p className="mt-3 font-medium">
+              No saved symptom checks yet
+            </p>
+
+            <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">
+              Once you complete and save your own
+              symptom checks, your match-strength trend
+              will appear here.
+            </p>
+
+            <Button
+              asChild
+              className="mt-5"
+            >
+              <Link
+                to="/checker"
+                search={{
+                  subject: "self",
+                }}
+              >
+                Check My Symptoms
+              </Link>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /*                  Normalize / sort history                             */
+  /* ---------------------------------------------------------------------- */
+
+  const points = history
+    .filter(
+      (item) =>
+        Number.isFinite(
+          Number(item.severity),
+        ),
+    )
+    .map((item) => ({
+      ...item,
+      value: clamp(
+        Number(item.severity),
+        0,
+        100,
+      ),
+      timestamp:
+        new Date(
+          item.date,
+        ).getTime(),
+    }))
+    .sort(
+      (a, b) =>
+        a.timestamp - b.timestamp,
+    );
+
+  if (!points.length) {
+    return (
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>
+            My Symptom History
+          </CardTitle>
+
+          <CardDescription>
+            Your own symptom match-strength trend.
+          </CardDescription>
+        </CardHeader>
+
+        <CardContent>
+          <div className="rounded-xl border border-dashed p-8 text-center">
+            <p className="font-medium">
+              No graphable history available
+            </p>
+
+            <p className="mt-2 text-sm text-muted-foreground">
+              Your saved checks do not currently contain
+              usable match-strength values.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const latest =
+    points[
+      points.length - 1
+    ];
+
+  const previous =
+    points.length > 1
+      ? points[
+          points.length - 2
+        ]
+      : null;
+
+  const difference =
+    previous
+      ? latest.value -
+        previous.value
+      : null;
+
+  /*
+   * Show the most recent 10 checks.
+   *
+   * This keeps the graph readable on mobile while
+   * preserving the complete history in /history.
+   */
+  const visiblePoints =
+    points.slice(-10);
+
+  return (
+    <Card className="mb-6 overflow-hidden">
+      <CardHeader>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Activity className="size-5" />
+            </div>
+
+            <div>
+              <CardTitle>
+                My Symptom History
+              </CardTitle>
+
+              <CardDescription className="mt-1">
+                Your own symptom match-strength trend.
+              </CardDescription>
+            </div>
+          </div>
+
+          <Button
+            variant="outline"
+            size="sm"
+            asChild
+          >
+            <Link to="/history">
+              View Full History
+              <ArrowLeft className="ml-2 size-4 rotate-180" />
+            </Link>
+          </Button>
+        </div>
+      </CardHeader>
+
+      <CardContent>
+
+        {/* ==============================================================
+            SUMMARY
+        ============================================================== */}
+
+        <div className="grid gap-3 sm:grid-cols-3">
+
+          <div className="rounded-xl border bg-muted/20 p-4">
+            <p className="text-xs font-medium text-muted-foreground">
+              Latest match strength
+            </p>
+
+            <p className="mt-1 text-2xl font-semibold">
+              {latest.value}%
+            </p>
+          </div>
+
+          <div className="rounded-xl border bg-muted/20 p-4">
+            <p className="text-xs font-medium text-muted-foreground">
+              Saved checks
+            </p>
+
+            <p className="mt-1 text-2xl font-semibold">
+              {points.length}
+            </p>
+          </div>
+
+          <div className="rounded-xl border bg-muted/20 p-4">
+            <p className="text-xs font-medium text-muted-foreground">
+              Change from previous
+            </p>
+
+            <p className="mt-1 text-2xl font-semibold">
+              {difference === null
+                ? "—"
+                : `${difference > 0 ? "+" : ""}${difference}%`}
+            </p>
+          </div>
+        </div>
+
+        {/* ==============================================================
+            GRAPH
+        ============================================================== */}
+
+        <div className="mt-6">
+          <div
+            className="relative h-[280px] w-full overflow-hidden rounded-xl border bg-background"
+            aria-label="Your symptom match strength trend graph"
+            role="img"
+          >
+
+            {/* ----------------------------------------------------------
+                Horizontal grid lines
+            ----------------------------------------------------------- */}
+
+            {[0, 25, 50, 75, 100].map(
+              (value) => (
+                <div
+                  key={value}
+                  className="absolute left-10 right-3 border-t border-dashed border-border/70"
+                  style={{
+                    bottom: `${value}%`,
+                  }}
+                >
+                  <span className="absolute -left-9 -top-2 text-[10px] text-muted-foreground">
+                    {value}
+                  </span>
+                </div>
+              ),
+            )}
+
+            {/* ----------------------------------------------------------
+                Graph area
+            ----------------------------------------------------------- */}
+
+            <div className="absolute inset-y-3 left-10 right-3 bottom-8">
+
+              <div className="relative h-full w-full">
+
+                {visiblePoints.length === 1 ? (
+                  <SingleGraphPoint
+                    value={
+                      visiblePoints[0].value
+                    }
+                    label={formatShortDate(
+                      visiblePoints[0].date,
+                    )}
+                  />
+                ) : (
+                  <svg
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                    className="absolute inset-0 h-full w-full overflow-visible"
+                  >
+                    {/* ------------------------------------------------
+                        Trend line
+                    ------------------------------------------------- */}
+
+                    <polyline
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      vectorEffect="non-scaling-stroke"
+                      points={visiblePoints
+                        .map(
+                          (
+                            point,
+                            index,
+                          ) => {
+                            const x =
+                              visiblePoints.length ===
+                              1
+                                ? 50
+                                : (index /
+                                    (visiblePoints.length -
+                                      1)) *
+                                  100;
+
+                            const y =
+                              100 -
+                              point.value;
+
+                            return `${x},${y}`;
+                          },
+                        )
+                        .join(" ")}
+                      className="text-primary"
+                    />
+
+                    {/* ------------------------------------------------
+                        Point markers
+                    ------------------------------------------------- */}
+
+                    {visiblePoints.map(
+                      (
+                        point,
+                        index,
+                      ) => {
+                        const x =
+                          visiblePoints.length ===
+                          1
+                            ? 50
+                            : (index /
+                                (visiblePoints.length -
+                                  1)) *
+                              100;
+
+                        const y =
+                          100 -
+                          point.value;
+
+                        return (
+                          <circle
+                            key={
+                              point.id
+                            }
+                            cx={x}
+                            cy={y}
+                            r="2.4"
+                            vectorEffect="non-scaling-stroke"
+                            className="fill-background stroke-primary"
+                            strokeWidth="1.5"
+                          />
+                        );
+                      },
+                    )}
+                  </svg>
+                )}
+
+                {/* ------------------------------------------------------
+                    X-axis labels
+                ------------------------------------------------------- */}
+
+                <div className="absolute -bottom-6 left-0 right-0 flex justify-between gap-2">
+                  {visiblePoints.map(
+                    (
+                      point,
+                      index,
+                    ) => {
+                      /*
+                       * On larger histories, showing every label can
+                       * make the graph crowded. We therefore show
+                       * the first, last and selected intermediate
+                       * labels.
+                       */
+                      const shouldShow =
+                        visiblePoints.length <=
+                          5 ||
+                        index === 0 ||
+                        index ===
+                          visiblePoints.length -
+                            1 ||
+                        index %
+                          Math.max(
+                            1,
+                            Math.ceil(
+                              visiblePoints.length /
+                                4,
+                            ),
+                          ) ===
+                          0;
+
+                      return (
+                        <span
+                          key={
+                            point.id
+                          }
+                          className={`text-[9px] text-muted-foreground ${
+                            shouldShow
+                              ? ""
+                              : "invisible"
+                          }`}
+                        >
+                          {formatShortDate(
+                            point.date,
+                          )}
+                        </span>
+                      );
+                    },
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center justify-between gap-4 text-xs text-muted-foreground">
+            <span>
+              Lower match strength
+            </span>
+
+            <span>
+              Higher match strength
+            </span>
+          </div>
+        </div>
+
+        {/* ==============================================================
+            IMPORTANT SEMANTIC NOTE
+        ============================================================== */}
+
+        <div className="mt-5 rounded-xl border border-border/70 bg-muted/20 p-4">
+          <p className="text-xs leading-5 text-muted-foreground">
+            <span className="font-medium text-foreground">
+              About this graph:
+            </span>{" "}
+            Match strength reflects how strongly the
+            reported symptoms matched the assessment's
+            possible conditions. It is not a validated
+            diagnostic probability, disease risk
+            percentage, or diagnosis.
+          </p>
+        </div>
+
+        {/* ==============================================================
+            LATEST SYMPTOM
+        ============================================================== */}
+
+        <div className="mt-5 rounded-xl border p-4">
+          <p className="text-xs font-medium text-muted-foreground">
+            Latest check
+          </p>
+
+          <p className="mt-1 line-clamp-2 text-sm font-medium">
+            {latest.symptoms ||
+              "Symptoms not available"}
+          </p>
+
+          {latest.summary ? (
+            <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">
+              {latest.summary}
+            </p>
+          ) : null}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ==========================================================================
+   SINGLE POINT GRAPH
+   ========================================================================== */
+
+function SingleGraphPoint({
+  value,
+  label,
+}: {
+  value: number;
+  label: string;
+}) {
+  const bottom =
+    clamp(value, 0, 100);
+
+  return (
+    <div className="absolute inset-0">
+      <div
+        className="absolute -translate-x-1/2 -translate-y-1/2"
+        style={{
+          left: "50%",
+          bottom: `${bottom}%`,
+        }}
+      >
+        <div className="flex items-center justify-center">
+          <div className="size-4 rounded-full border-2 border-primary bg-background shadow-sm" />
+        </div>
+
+        <div className="absolute left-1/2 top-6 -translate-x-1/2 whitespace-nowrap text-[10px] text-muted-foreground">
+          {label}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ==========================================================================
+   Helpers
+   ========================================================================== */
+
+function clamp(
+  value: number,
+  min: number,
+  max: number,
+) {
+  return Math.min(
+    max,
+    Math.max(min, value),
+  );
+}
+
+function formatShortDate(
+  value: string,
+) {
+  const date =
+    new Date(value);
+
+  if (
+    Number.isNaN(
+      date.getTime(),
+    )
+  ) {
+    return "—";
+  }
+
+  return new Intl.DateTimeFormat(
+    "en-IN",
+    {
+      day: "2-digit",
+      month: "short",
+    },
+  ).format(date);
 }
 
 function Required() {
