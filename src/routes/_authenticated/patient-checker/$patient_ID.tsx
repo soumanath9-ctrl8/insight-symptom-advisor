@@ -12,7 +12,10 @@ import {
 
 import { useServerFn } from "@tanstack/react-start";
 
-import { useMemo, useState } from "react";
+import {
+  useMemo,
+  useState,
+} from "react";
 
 import {
   Activity,
@@ -40,17 +43,29 @@ import {
   type FollowUpQuestion,
 } from "@/lib/symptoms.functions";
 
-import { getPatient } from "@/lib/profile.functions";
+import {
+  getPatient,
+} from "@/lib/profile.functions";
 
-import { saveCheck } from "@/lib/history.functions";
+import {
+  saveCheck,
+} from "@/lib/history.functions";
 
-import { extractVitals } from "@/lib/vitals";
+import {
+  extractVitals,
+} from "@/lib/vitals";
 
-import { useLang } from "@/lib/i18n";
+import {
+  useLang,
+} from "@/lib/i18n";
 
-import { ProfileMenu } from "@/components/ProfileMenu";
+import {
+  ProfileMenu,
+} from "@/components/ProfileMenu";
 
-import { Button } from "@/components/ui/button";
+import {
+  Button,
+} from "@/components/ui/button";
 
 import {
   Card,
@@ -60,17 +75,29 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-import { Badge } from "@/components/ui/badge";
+import {
+  Badge,
+} from "@/components/ui/badge";
 
-import { Textarea } from "@/components/ui/textarea";
+import {
+  Textarea,
+} from "@/components/ui/textarea";
 
-import { Input } from "@/components/ui/input";
+import {
+  Input,
+} from "@/components/ui/input";
 
-import { Label } from "@/components/ui/label";
+import {
+  Label,
+} from "@/components/ui/label";
 
-import { Progress } from "@/components/ui/progress";
+import {
+  Progress,
+} from "@/components/ui/progress";
 
-import { Separator } from "@/components/ui/separator";
+import {
+  Separator,
+} from "@/components/ui/separator";
 
 import {
   Alert,
@@ -79,184 +106,87 @@ import {
 } from "@/components/ui/alert";
 
 /* -------------------------------------------------------------------------- */
-/*                                  ROUTE                                     */
+/*                                  Route                                     */
 /* -------------------------------------------------------------------------- */
 
-export const Route = createFileRoute(
-  "/_authenticated/patient-checker/$patient_ID",
-)({
-  ssr: false,
+export const Route =
+  createFileRoute(
+    "/_authenticated/patient-checker/$patient_ID",
+  )({
+    ssr: false,
 
-  beforeLoad: async ({ params }) => {
-    if (!params.patient_ID) {
-      throw redirect({
-        to: "/patients",
-      });
-    }
+    beforeLoad: async ({
+      params,
+    }) => {
+      const patientId =
+        params.patient_ID?.trim();
 
-    return {
-      patientId: params.patient_ID,
-    };
-  },
+      if (!patientId) {
+        throw redirect({
+          to: "/patients",
+        });
+      }
 
-  component: PatientSymptomCheckerPage,
-});
+      return {
+        patientId,
+      };
+    },
 
-/* -------------------------------------------------------------------------- */
-/*                                  TYPES                                     */
-/* -------------------------------------------------------------------------- */
-
-type Stage =
-  | "intake"
-  | "questions"
-  | "result";
-
-type Answer = {
-  question: string;
-  answer: string;
-};
+    component:
+      PatientCheckerRoute,
+  });
 
 /* -------------------------------------------------------------------------- */
-/*                                HELPERS                                     */
+/*                              Main Route                                    */
 /* -------------------------------------------------------------------------- */
 
-function clampMatchStrength(value: number) {
-  if (!Number.isFinite(value)) {
-    return 0;
-  }
-
-  return Math.max(
-    0,
-    Math.min(
-      100,
-      Math.round(value),
-    ),
-  );
-}
-
-function topCondition(
-  assessment: Assessment | null,
-) {
-  if (
-    !assessment?.conditions?.length
-  ) {
-    return null;
-  }
+function PatientCheckerRoute() {
+  const {
+    patientId,
+  } =
+    Route.useRouteContext();
 
   return (
-    [...assessment.conditions].sort(
-      (a, b) =>
-        clampMatchStrength(
-          b.likelihood,
-        ) -
-        clampMatchStrength(
-          a.likelihood,
-        ),
-    )[0] ?? null
+    <PatientChecker
+      patientId={
+        patientId
+      }
+    />
   );
 }
 
-function formatUrgency(
-  urgency: Assessment["urgency"],
-) {
-  switch (urgency) {
-    case "emergency":
-      return "Emergency";
-
-    case "urgent":
-      return "Urgent";
-
-    case "see-a-doctor":
-      return "See a doctor";
-
-    default:
-      return "Self-care";
-  }
-}
-
-function urgencyClass(
-  urgency: Assessment["urgency"],
-) {
-  switch (urgency) {
-    case "emergency":
-      return "border-destructive/50 bg-destructive/10 text-destructive";
-
-    case "urgent":
-      return "border-orange-500/30 bg-orange-500/10 text-orange-300";
-
-    case "see-a-doctor":
-      return "border-yellow-500/30 bg-yellow-500/10 text-yellow-300";
-
-    default:
-      return "border-primary/30 bg-primary/10 text-primary";
-  }
-}
-
-function riskClass(
-  risk: string,
-) {
-  const value =
-    risk.toLowerCase();
-
-  if (
-    value.includes("high") ||
-    value.includes("উচ্চ")
-  ) {
-    return "border-destructive/30 bg-destructive/10 text-destructive";
-  }
-
-  if (
-    value.includes("moderate") ||
-    value.includes("medium") ||
-    value.includes("মধ্যম")
-  ) {
-    return "border-yellow-500/30 bg-yellow-500/10 text-yellow-300";
-  }
-
-  return "border-primary/30 bg-primary/10 text-primary";
-}
-
 /* -------------------------------------------------------------------------- */
-/*                         PATIENT SYMPTOM CHECKER                            */
+/*                              Main Component                                */
 /* -------------------------------------------------------------------------- */
 
-function PatientSymptomCheckerPage() {
-  const {
-    patient_ID: patientId,
-  } = Route.useParams();
+function PatientChecker({
+  patientId,
+}: {
+  patientId: string;
+}) {
+  const { lang } =
+    useLang();
 
   const queryClient =
     useQueryClient();
 
-  /* ---------------------------------------------------------------------- */
-  /*                              LANGUAGE                                  */
-  /* ---------------------------------------------------------------------- */
-
-  const langState = useLang() as {
-    lang?: "en" | "bn";
-    language?: "en" | "bn";
-  };
-
-  const language =
-    langState.lang ??
-    langState.language ??
-    "en";
-
-  /* ---------------------------------------------------------------------- */
-  /*                         SERVER FUNCTIONS                                */
-  /* ---------------------------------------------------------------------- */
+  /* ------------------------------------------------------------------------ */
+  /*                                Server Fns                                */
+  /* ------------------------------------------------------------------------ */
 
   const getPatientFn =
-    useServerFn(getPatient);
+    useServerFn(
+      getPatient,
+    );
+
+  const emergencyFn =
+    useServerFn(
+      immediateEmergencyAssessment,
+    );
 
   const questionsFn =
     useServerFn(
       getPatientFollowUpQuestions,
-    );
-
-  const immediateAssessmentFn =
-    useServerFn(
-      immediateEmergencyAssessment,
     );
 
   const assessmentFn =
@@ -264,17 +194,19 @@ function PatientSymptomCheckerPage() {
       assessPatientSymptoms,
     );
 
-  const saveCheckFn =
-    useServerFn(saveCheck);
+  const saveFn =
+    useServerFn(
+      saveCheck,
+    );
 
-  /* ---------------------------------------------------------------------- */
-  /*                              PATIENT QUERY                              */
-  /* ---------------------------------------------------------------------- */
+  /* ------------------------------------------------------------------------ */
+  /*                              Patient Query                               */
+  /* ------------------------------------------------------------------------ */
 
   const patientQuery =
     useQuery({
       queryKey: [
-        "patient",
+        "patient-profile",
         patientId,
       ],
 
@@ -284,380 +216,557 @@ function PatientSymptomCheckerPage() {
             id: patientId,
           },
         }),
+
+      enabled:
+        Boolean(
+          patientId,
+        ),
     });
 
   const patient =
     patientQuery.data;
 
-  /* ---------------------------------------------------------------------- */
-  /*                                  STATE                                  */
-  /* ---------------------------------------------------------------------- */
+  /* ------------------------------------------------------------------------ */
+  /*                                  State                                   */
+  /* ------------------------------------------------------------------------ */
 
-  const [stage, setStage] =
-    useState<Stage>(
-      "intake",
-    );
+  const [
+    stage,
+    setStage,
+  ] =
+    useState<
+      "intake" |
+      "questions" |
+      "result"
+    >("intake");
 
-  const [symptoms, setSymptoms] =
+  const [
+    symptoms,
+    setSymptoms,
+  ] =
     useState("");
 
-  const [duration, setDuration] =
+  const [
+    duration,
+    setDuration,
+  ] =
     useState("");
 
-  const [questions, setQuestions] =
+  const [
+    questions,
+    setQuestions,
+  ] =
     useState<
       FollowUpQuestion[]
     >([]);
 
-  const [answers, setAnswers] =
-    useState<Answer[]>([]);
+  const [
+    answers,
+    setAnswers,
+  ] =
+    useState<
+      Record<
+        string,
+        string
+      >
+    >({});
 
   const [
     currentAnswer,
     setCurrentAnswer,
-  ] = useState("");
+  ] =
+    useState("");
 
-  const [step, setStep] =
+  const [
+    step,
+    setStep,
+  ] =
     useState(0);
 
   const [
     assessment,
     setAssessment,
   ] =
-    useState<Assessment | null>(
-      null,
-    );
+    useState<
+      Assessment | null
+    >(null);
 
-  const [savedId, setSavedId] =
-    useState<string | null>(
-      null,
-    );
+  const [
+    savedId,
+    setSavedId,
+  ] =
+    useState<
+      string | null
+    >(null);
 
-  const [saveError, setSaveError] =
-    useState<string | null>(
-      null,
-    );
+  const [
+    saveError,
+    setSaveError,
+  ] =
+    useState<
+      string | null
+    >(null);
 
-  const [formError, setFormError] =
-    useState<string | null>(
-      null,
-    );
+  const [
+    formError,
+    setFormError,
+  ] =
+    useState<
+      string | null
+    >(null);
 
-  /* ---------------------------------------------------------------------- */
-  /*                         BASE PATIENT INPUT                              */
-  /* ---------------------------------------------------------------------- */
+  /* ------------------------------------------------------------------------ */
+  /*                         Patient Display Name                             */
+  /* ------------------------------------------------------------------------ */
+
+  const patientName =
+    patient?.name?.trim() ||
+    "Patient";
+
+  /* ------------------------------------------------------------------------ */
+  /*                         Base Patient Input                               */
+  /* ------------------------------------------------------------------------ */
 
   const baseInput =
     useMemo(
       () => ({
         patientId,
+
         symptoms:
           symptoms.trim(),
+
         duration:
           duration.trim() ||
           undefined,
-        language,
+
+        language:
+          lang === "bn"
+            ? "bn"
+            : "en",
       }),
       [
         patientId,
         symptoms,
         duration,
-        language,
+        lang,
       ],
     );
 
-  /* ---------------------------------------------------------------------- */
-  /*                         CURRENT QUESTION                                */
-  /* ---------------------------------------------------------------------- */
+  /* ------------------------------------------------------------------------ */
+  /*                         Answer Pairs                                     */
+  /* ------------------------------------------------------------------------ */
 
-  const currentQuestion =
-    questions[step] ?? null;
+  const answerPairs =
+    useMemo(
+      () =>
+        questions
+          .map(
+            (
+              question,
+            ) => ({
+              question:
+                question.question,
 
-  const questionProgress =
-    questions.length > 0
-      ? Math.round(
-          ((step + 1) /
-            questions.length) *
-            100,
-        )
-      : 0;
+              answer:
+                (
+                  answers[
+                    question.id
+                  ] ??
+                  ""
+                ).trim(),
+            }),
+          )
+          .filter(
+            (
+              item,
+            ) =>
+              Boolean(
+                item.answer,
+              ),
+          ),
+      [
+        questions,
+        answers,
+      ],
+    );
 
-  /* ---------------------------------------------------------------------- */
-  /*                         IMMEDIATE SAFETY                                */
-  /* ---------------------------------------------------------------------- */
+  /* ------------------------------------------------------------------------ */
+  /*                     Patient-Reported Text Only                           */
+  /* ------------------------------------------------------------------------ */
 
   /*
    * IMPORTANT:
    *
-   * immediateEmergencyAssessment() is the generic
-   * immediate safety screen.
+   * Question text is deliberately NOT included here.
    *
-   * It must NOT receive patientId because patientId
-   * is not part of the generic ContextInput schema.
+   * Otherwise a question such as:
+   * "Do you have chest pain?"
    *
-   * Patient-specific background is handled by the
-   * patient assessment functions on the server.
+   * could incorrectly be interpreted as the patient reporting
+   * chest pain.
    */
+  const patientReportedText =
+    useMemo(
+      () =>
+        [
+          symptoms.trim(),
+
+          duration.trim(),
+
+          ...answerPairs.map(
+            (
+              item,
+            ) =>
+              item.answer,
+          ),
+        ]
+          .filter(
+            Boolean,
+          )
+          .join("\n"),
+      [
+        symptoms,
+        duration,
+        answerPairs,
+      ],
+    );
+
+  /* ------------------------------------------------------------------------ */
+  /*                         Top Match Strength                               */
+  /* ------------------------------------------------------------------------ */
+
+  const topCondition =
+    useMemo(() => {
+      if (
+        !assessment?.conditions?.length
+      ) {
+        return null;
+      }
+
+      return [
+        ...assessment.conditions,
+      ].sort(
+        (
+          a,
+          b,
+        ) =>
+          b.likelihood -
+          a.likelihood,
+      )[0] ?? null;
+    }, [
+      assessment,
+    ]);
+
+  /*
+   * likelihood here is NOT treated as a calibrated probability.
+   *
+   * It is stored/displayed only as the application's
+   * symptom-match strength, normalized to 0–100.
+   */
+  const matchStrength =
+    useMemo(
+      () =>
+        normalizeMatchStrength(
+          topCondition?.likelihood ??
+            0,
+        ),
+      [
+        topCondition,
+      ],
+    );
+
+  /* ------------------------------------------------------------------------ */
+  /*                        Emergency Assessment                             */
+  /* ------------------------------------------------------------------------ */
 
   const immediateMutation =
     useMutation({
-      mutationFn: (input: {
-        symptoms: string;
-        duration?: string;
-        language: "en" | "bn";
-        answers?: Answer[];
-      }) =>
-        immediateAssessmentFn({
-          data: input,
-        }),
+      mutationFn:
+        (
+          input: {
+            symptoms: string;
+            duration?: string;
+            language:
+              | "en"
+              | "bn";
+            answers?: {
+              question: string;
+              answer: string;
+            }[];
+          },
+        ) =>
+          emergencyFn({
+            data: input,
+          }),
     });
 
-  /* ---------------------------------------------------------------------- */
-  /*                         FOLLOW-UP QUESTIONS                             */
-  /* ---------------------------------------------------------------------- */
+  /* ------------------------------------------------------------------------ */
+  /*                       Follow-Up Questions                               */
+  /* ------------------------------------------------------------------------ */
 
   const questionsMutation =
     useMutation({
-      mutationFn: () =>
-        questionsFn({
-          data: baseInput,
-        }),
+      mutationFn:
+        () =>
+          questionsFn({
+            data: {
+              ...baseInput,
+            },
+          }),
     });
 
-  /* ---------------------------------------------------------------------- */
-  /*                              ASSESSMENT                                 */
-  /* ---------------------------------------------------------------------- */
+  /* ------------------------------------------------------------------------ */
+  /*                         Assessment Mutation                              */
+  /* ------------------------------------------------------------------------ */
 
   const assessmentMutation =
     useMutation({
-      mutationFn: (
-        input: {
-          answers: Answer[];
-        },
-      ) =>
-        assessmentFn({
-          data: {
-            ...baseInput,
-            answers:
-              input.answers,
-          },
-        }),
+      mutationFn:
+        (
+          currentAnswers: {
+            question: string;
+            answer: string;
+          }[],
+        ) =>
+          assessmentFn({
+            data: {
+              ...baseInput,
 
-      onSuccess: (
-        result,
-      ) => {
-        setAssessment(
+              answers:
+                currentAnswers,
+            },
+          }),
+
+      onSuccess:
+        (
           result,
-        );
-
-        setStage(
-          "result",
-        );
-
-        setFormError(
-          null,
-        );
-      },
-    });
-
-  /* ---------------------------------------------------------------------- */
-  /*                                  SAVE                                   */
-  /* ---------------------------------------------------------------------- */
-
-  const saveMutation =
-    useMutation({
-      mutationFn: (
-        result: Assessment,
-      ) => {
-        const top =
-          topCondition(
+        ) => {
+          setAssessment(
             result,
           );
 
-        const answerPairs =
-          answers.map(
-            (item) => ({
-              question:
-                item.question,
-              answer:
-                item.answer,
-            }),
+          setStage(
+            "result",
+          );
+        },
+    });
+
+  /* ------------------------------------------------------------------------ */
+  /*                              Save Mutation                               */
+  /* ------------------------------------------------------------------------ */
+
+  const saveMutation =
+    useMutation({
+      mutationFn:
+        (
+          result: Assessment,
+        ) => {
+          /*
+           * Determine the top condition from the assessment itself.
+           *
+           * This replaces the old:
+           *
+           * severity: 1
+           *
+           * temporary value.
+           */
+          const top =
+            result.conditions?.length
+              ? [
+                  ...result.conditions,
+                ].sort(
+                  (
+                    a,
+                    b,
+                  ) =>
+                    b.likelihood -
+                    a.likelihood,
+                )[0] ?? null
+              : null;
+
+          const savedMatchStrength =
+            normalizeMatchStrength(
+              top?.likelihood ??
+                0,
+            );
+
+          /*
+           * Extract vitals ONLY from patient-reported information.
+           *
+           * No follow-up question text is included.
+           */
+          const vitals =
+            extractVitals(
+              patientReportedText,
+            );
+
+          return saveFn({
+            data: {
+              symptoms:
+                symptoms.trim(),
+
+              duration:
+                duration.trim() ||
+                undefined,
+
+              severity:
+                savedMatchStrength,
+
+              urgency:
+                result.urgency,
+
+              topCondition:
+                top?.name ??
+                "",
+
+              summary:
+                result.summary ??
+                "",
+
+              redFlag:
+                Boolean(
+                  result.redFlag,
+                ),
+
+              redFlags:
+                result.redFlags ??
+                [],
+
+              categories:
+                result.categories ??
+                [],
+
+              supportingFactors:
+                result.supportingFactors ??
+                [],
+
+              uncertainty:
+                result.uncertainty ??
+                "",
+
+              nextStep:
+                result.nextStep ??
+                "",
+
+              subjectType:
+                "patient",
+
+              patientId,
+
+              vitals,
+            },
+          });
+        },
+
+      onSuccess:
+        async (
+          saved,
+        ) => {
+          /*
+           * IMPORTANT:
+           * Save state is set from the actual server response ID.
+           *
+           * Never use:
+           * setSavedId("saved")
+           */
+          setSavedId(
+            saved.id,
           );
 
-        /*
-         * IMPORTANT:
-         *
-         * Only patient-reported information is passed
-         * to extractVitals().
-         *
-         * Question text is deliberately excluded.
-         */
-        const patientReportedText =
-          [
-            symptoms,
-            duration,
-            ...answerPairs.map(
-              (item) =>
-                item.answer,
-            ),
-          ]
-            .filter(Boolean)
-            .join("\n");
-
-        const vitals =
-          extractVitals(
-            patientReportedText,
+          setSaveError(
+            null,
           );
 
-        /*
-         * IMPORTANT:
-         *
-         * The current history SaveCheck schema expects
-         * severity in the 1–10 range.
-         *
-         * Therefore we DO NOT put the 0–100 symptom
-         * match strength into severity here.
-         *
-         * Match strength remains part of the assessment
-         * and is displayed as a percentage.
-         *
-         * Use a safe default of 1 for the history field.
-         */
-        return saveCheckFn({
-          data: {
+          /*
+           * Patient history has its own cache key.
+           */
+          await queryClient.invalidateQueries(
+            {
+              queryKey: [
+                "patient-checks",
+                patientId,
+              ],
+            },
+          );
+        },
+
+      onError:
+        () => {
+          setSaveError(
+            "Could not save this symptom check. Please try again.",
+          );
+        },
+    });
+
+  /* ------------------------------------------------------------------------ */
+  /*                         Validation                                      */
+  /* ------------------------------------------------------------------------ */
+
+  const validateIntake =
+    () => {
+      if (
+        !symptoms.trim()
+      ) {
+        setFormError(
+          "Please describe the patient's symptoms.",
+        );
+
+        return false;
+      }
+
+      setFormError(
+        null,
+      );
+
+      return true;
+    };
+
+  /* ------------------------------------------------------------------------ */
+  /*                         Start Patient Check                              */
+  /* ------------------------------------------------------------------------ */
+
+  const startCheck =
+    async () => {
+      if (
+        !validateIntake()
+      ) {
+        return;
+      }
+
+      /*
+       * Generic immediate safety assessment.
+       *
+       * Do NOT pass patientId here because the generic emergency
+       * function does not accept patientId.
+       */
+      const safety =
+        await immediateMutation.mutateAsync(
+          {
             symptoms:
               symptoms.trim(),
 
             duration:
               duration.trim() ||
-              null,
-
-            severity: 1,
-
-            urgency:
-              result.urgency,
-
-            topCondition:
-              top?.name ??
-              "No specific condition identified",
-
-            summary:
-              result.summary,
-
-            assessment:
-              result,
-
-            answers:
-              answerPairs,
-
-            vitals,
-
-            subjectType:
-              "patient",
-
-            patientId,
-          },
-        });
-      },
-
-      onSuccess: (
-        saved,
-      ) => {
-        /*
-         * Always use the actual database ID.
-         */
-        setSavedId(
-          saved?.id ??
-            null,
-        );
-
-        setSaveError(
-          null,
-        );
-
-        queryClient.invalidateQueries(
-          {
-            queryKey: [
-              "patient-checks",
-              patientId,
-            ],
-          },
-        );
-      },
-
-      onError: (
-        error,
-      ) => {
-        setSaveError(
-          error instanceof Error
-            ? error.message
-            : "Could not save this symptom check.",
-        );
-      },
-    });
-
-  /* ---------------------------------------------------------------------- */
-  /*                            START CHECK                                  */
-  /* ---------------------------------------------------------------------- */
-
-  async function startCheck() {
-    setFormError(
-      null,
-    );
-
-    const cleanSymptoms =
-      symptoms.trim();
-
-    if (
-      cleanSymptoms.length <
-      3
-    ) {
-      setFormError(
-        "Please describe at least one symptom before continuing.",
-      );
-
-      return;
-    }
-
-    if (!patient) {
-      setFormError(
-        "Patient profile could not be loaded.",
-      );
-
-      return;
-    }
-
-    /*
-     * First perform immediate safety screening.
-     *
-     * No question text is included.
-     */
-    try {
-      const emergencyResult =
-        await immediateMutation.mutateAsync(
-          {
-            symptoms:
-              cleanSymptoms,
-
-            duration:
-              duration.trim() ||
               undefined,
 
-            language,
+            language:
+              lang === "bn"
+                ? "bn"
+                : "en",
           },
         );
 
       /*
-       * ONLY "emergency" is emergency.
+       * Emergency and urgent are intentionally different.
        *
-       * "urgent" remains a separate urgency level.
+       * Only emergency immediately ends the normal flow.
        */
       if (
-        emergencyResult?.urgency ===
+        safety?.urgency ===
         "emergency"
       ) {
         setAssessment(
-          emergencyResult,
+          safety,
         );
 
         setStage(
@@ -666,19 +775,12 @@ function PatientSymptomCheckerPage() {
 
         return;
       }
-    } catch {
+
       /*
-       * The immediate safety screen must not prevent
-       * the patient-specific assessment from running
-       * if the separate safety request fails.
+       * Get questions using the patient-specific server function.
+       * That function verifies patient ownership and loads the
+       * patient's profile server-side.
        */
-    }
-
-    /* ------------------------------------------------------------------ */
-    /*                       ADAPTIVE QUESTIONS                            */
-    /* ------------------------------------------------------------------ */
-
-    try {
       const result =
         await questionsMutation.mutateAsync();
 
@@ -690,91 +792,111 @@ function PatientSymptomCheckerPage() {
         nextQuestions.length ===
         0
       ) {
-        await assessmentMutation.mutateAsync(
-          {
-            answers: [],
-          },
-        );
+        const finalAssessment =
+          await assessmentMutation.mutateAsync(
+            [],
+          );
+
+        /*
+         * assessmentMutation handles result state.
+         */
+        void finalAssessment;
 
         return;
       }
 
       setQuestions(
-        nextQuestions.slice(
-          0,
-          6,
-        ),
+        nextQuestions,
       );
 
-      setAnswers([]);
+      setAnswers(
+        {},
+      );
 
       setCurrentAnswer(
         "",
       );
 
-      setStep(0);
+      setStep(
+        0,
+      );
 
       setStage(
         "questions",
       );
-    } catch (
-      error,
-    ) {
-      setFormError(
-        error instanceof Error
-          ? error.message
-          : "Could not prepare the follow-up questions. Please try again.",
-      );
-    }
-  }
+    };
 
-  /* ---------------------------------------------------------------------- */
-  /*                         SUBMIT QUESTION                                 */
-  /* ---------------------------------------------------------------------- */
+  /* ------------------------------------------------------------------------ */
+  /*                         Submit Question                                  */
+  /* ------------------------------------------------------------------------ */
 
-  async function submitAnswer() {
-    if (
-      !currentQuestion
-    ) {
-      return;
-    }
+  const submitAnswer =
+    async () => {
+      const currentQuestion =
+        questions[
+          step
+        ];
 
-    const cleanAnswer =
-      currentAnswer.trim();
+      if (
+        !currentQuestion
+      ) {
+        return;
+      }
 
-    if (
-      !cleanAnswer
-    ) {
-      setFormError(
-        "Please answer the question before continuing.",
-      );
+      const answer =
+        currentAnswer.trim();
 
-      return;
-    }
+      if (!answer) {
+        return;
+      }
 
-    setFormError(
-      null,
-    );
-
-    const nextAnswers =
-      [
-        ...answers,
+      const updatedAnswers =
         {
-          question:
-            currentQuestion.question,
-          answer:
-            cleanAnswer,
-        },
-      ];
+          ...answers,
 
-    /*
-     * Immediate safety screen.
-     *
-     * Only the symptom text + patient's actual answer
-     * are sent.
-     */
-    try {
-      const safetyResult =
+          [currentQuestion.id]:
+            answer,
+        };
+
+      setAnswers(
+        updatedAnswers,
+      );
+
+      const updatedPairs =
+        questions
+          .map(
+            (
+              question,
+            ) => ({
+              question:
+                question.question,
+
+              answer:
+                (
+                  updatedAnswers[
+                    question.id
+                  ] ??
+                  ""
+                ).trim(),
+            }),
+          )
+          .filter(
+            (
+              item,
+            ) =>
+              Boolean(
+                item.answer,
+              ),
+          );
+
+      /*
+       * Immediate safety check uses ONLY patient-reported answers.
+       *
+       * The question text is sent as structure to the safety function,
+       * but the emergency/red-flag logic must evaluate the patient's
+       * answer rather than treating the question itself as a symptom.
+       */
+      const safety =
         await immediateMutation.mutateAsync(
           {
             symptoms:
@@ -784,23 +906,22 @@ function PatientSymptomCheckerPage() {
               duration.trim() ||
               undefined,
 
-            language,
+            language:
+              lang === "bn"
+                ? "bn"
+                : "en",
 
             answers:
-              nextAnswers,
+              updatedPairs,
           },
         );
 
       if (
-        safetyResult?.urgency ===
+        safety?.urgency ===
         "emergency"
       ) {
-        setAnswers(
-          nextAnswers,
-        );
-
         setAssessment(
-          safetyResult,
+          safety,
         );
 
         setStage(
@@ -809,124 +930,149 @@ function PatientSymptomCheckerPage() {
 
         return;
       }
-    } catch {
-      /*
-       * Continue to the normal patient assessment
-       * if the separate safety request fails.
-       */
-    }
 
-    /* ------------------------------------------------------------------ */
-    /*                       MORE QUESTIONS                               */
-    /* ------------------------------------------------------------------ */
+      if (
+        step <
+        questions.length -
+          1
+      ) {
+        setStep(
+          (
+            currentStep,
+          ) =>
+            currentStep +
+            1,
+        );
 
-    if (
-      step <
-      questions.length - 1
-    ) {
-      setAnswers(
-        nextAnswers,
+        setCurrentAnswer(
+          "",
+        );
+
+        return;
+      }
+
+      await assessmentMutation.mutateAsync(
+        updatedPairs,
       );
+    };
+
+  /* ------------------------------------------------------------------------ */
+  /*                         Previous Question                                */
+  /* ------------------------------------------------------------------------ */
+
+  const previousQuestion =
+    () => {
+      if (
+        step <= 0
+      ) {
+        return;
+      }
+
+      const previous =
+        questions[
+          step - 1
+        ];
 
       setStep(
-        (value) =>
-          value + 1,
+        (
+          currentStep,
+        ) =>
+          currentStep -
+          1,
+      );
+
+      setCurrentAnswer(
+        previous
+          ? answers[
+              previous.id
+            ] ??
+              ""
+          : "",
+      );
+    };
+
+  /* ------------------------------------------------------------------------ */
+  /*                             Save Result                                  */
+  /* ------------------------------------------------------------------------ */
+
+  const saveResult =
+    () => {
+      if (
+        !assessment ||
+        saveMutation.isPending ||
+        savedId
+      ) {
+        return;
+      }
+
+      setSaveError(
+        null,
+      );
+
+      saveMutation.mutate(
+        assessment,
+      );
+    };
+
+  /* ------------------------------------------------------------------------ */
+  /*                                Reset                                     */
+  /* ------------------------------------------------------------------------ */
+
+  const reset =
+    () => {
+      setStage(
+        "intake",
+      );
+
+      setSymptoms(
+        "",
+      );
+
+      setDuration(
+        "",
+      );
+
+      setQuestions(
+        [],
+      );
+
+      setAnswers(
+        {},
       );
 
       setCurrentAnswer(
         "",
       );
 
-      return;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /*                       FINAL ASSESSMENT                              */
-    /* ------------------------------------------------------------------ */
-
-    setAnswers(
-      nextAnswers,
-    );
-
-    try {
-      await assessmentMutation.mutateAsync(
-        {
-          answers:
-            nextAnswers,
-        },
+      setStep(
+        0,
       );
-    } catch (
-      error,
-    ) {
+
+      setAssessment(
+        null,
+      );
+
+      setSavedId(
+        null,
+      );
+
+      setSaveError(
+        null,
+      );
+
       setFormError(
-        error instanceof Error
-          ? error.message
-          : "The symptom assessment could not be completed. Please try again.",
+        null,
       );
-    }
-  }
 
-  /* ---------------------------------------------------------------------- */
-  /*                              SAVE RESULT                                */
-  /* ---------------------------------------------------------------------- */
+      immediateMutation.reset();
+      questionsMutation.reset();
+      assessmentMutation.reset();
+      saveMutation.reset();
+    };
 
-  function saveResult() {
-    if (
-      !assessment ||
-      saveMutation.isPending ||
-      savedId
-    ) {
-      return;
-    }
-
-    saveMutation.mutate(
-      assessment,
-    );
-  }
-
-  /* ---------------------------------------------------------------------- */
-  /*                                  RESET                                  */
-  /* ---------------------------------------------------------------------- */
-
-  function resetCheck() {
-    setStage(
-      "intake",
-    );
-
-    setSymptoms("");
-
-    setDuration("");
-
-    setQuestions([]);
-
-    setAnswers([]);
-
-    setCurrentAnswer(
-      "",
-    );
-
-    setStep(0);
-
-    setAssessment(
-      null,
-    );
-
-    setSavedId(
-      null,
-    );
-
-    setSaveError(
-      null,
-    );
-
-    setFormError(
-      null,
-    );
-  }
-
-  /* ---------------------------------------------------------------------- */
-  /*                           LOADING PATIENT                               */
-  /* ---------------------------------------------------------------------- */
+  /* ------------------------------------------------------------------------ */
+  /*                              Loading                                     */
+  /* ------------------------------------------------------------------------ */
 
   if (
     patientQuery.isLoading
@@ -935,23 +1081,24 @@ function PatientSymptomCheckerPage() {
       <main className="min-h-screen bg-background">
         <ProfileMenu />
 
-        <div className="mx-auto flex min-h-[70vh] max-w-4xl items-center justify-center px-5">
+        <div className="mx-auto flex min-h-[70vh] w-full max-w-4xl items-center justify-center px-5 py-8">
           <div
             className="flex items-center gap-3 text-sm text-muted-foreground"
             aria-live="polite"
           >
             <Loader2 className="size-5 animate-spin" />
 
-            Loading patient profile…
+            Loading patient
+            profile…
           </div>
         </div>
       </main>
     );
   }
 
-  /* ---------------------------------------------------------------------- */
-  /*                         PATIENT NOT FOUND                               */
-  /* ---------------------------------------------------------------------- */
+  /* ------------------------------------------------------------------------ */
+  /*                              Patient Error                               */
+  /* ------------------------------------------------------------------------ */
 
   if (
     patientQuery.isError ||
@@ -961,39 +1108,37 @@ function PatientSymptomCheckerPage() {
       <main className="min-h-screen bg-background">
         <ProfileMenu />
 
-        <div className="mx-auto max-w-3xl px-5 py-10 sm:py-16">
-          <Button
-            asChild
-            variant="ghost"
-            size="sm"
-          >
-            <Link to="/patients">
-              <ArrowLeft className="mr-2 size-4" />
+        <div className="mx-auto flex min-h-[70vh] w-full max-w-4xl items-center justify-center px-5 py-8">
+          <Card className="w-full max-w-lg">
+            <CardContent className="flex flex-col items-center justify-center px-6 py-10 text-center">
 
-              Back to Patients
-            </Link>
-          </Button>
+              <div className="flex size-14 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+                <AlertTriangle className="size-7" />
+              </div>
 
-          <Card className="mt-6">
-            <CardHeader>
-              <CardTitle>
-                Patient profile not found
-              </CardTitle>
+              <h1 className="mt-5 text-xl font-semibold">
+                Patient profile unavailable
+              </h1>
 
-              <CardDescription>
-                This patient may have
-                been deleted or may
-                not belong to your
-                account.
-              </CardDescription>
-            </CardHeader>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                This patient profile could
+                not be loaded. It may have
+                been removed or you may not
+                have access to it.
+              </p>
 
-            <CardContent>
-              <Button asChild>
-                <Link to="/patients">
-                  Go to Patients
+              <Button
+                asChild
+                className="mt-6"
+              >
+                <Link
+                  to="/patients"
+                >
+                  <ArrowLeft className="mr-2 size-4" />
+                  Back to Patients
                 </Link>
               </Button>
+
             </CardContent>
           </Card>
         </div>
@@ -1001,9 +1146,9 @@ function PatientSymptomCheckerPage() {
     );
   }
 
-  /* ---------------------------------------------------------------------- */
-  /*                                  MAIN                                   */
-  /* ---------------------------------------------------------------------- */
+  /* ------------------------------------------------------------------------ */
+  /*                              Main UI                                     */
+  /* ------------------------------------------------------------------------ */
 
   return (
     <main className="min-h-screen bg-background">
@@ -1012,13 +1157,27 @@ function PatientSymptomCheckerPage() {
       <div className="mx-auto w-full max-w-4xl space-y-6 px-5 py-8 sm:py-12">
 
         {/* ---------------------------------------------------------------- */}
-        {/* BACK                                                              */}
+        {/* Top Navigation                                                     */}
         {/* ---------------------------------------------------------------- */}
 
-        <div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+
           <Button
             asChild
             variant="ghost"
+            size="sm"
+          >
+            <Link
+              to="/patients"
+            >
+              <ArrowLeft className="mr-2 size-4" />
+              Patients
+            </Link>
+          </Button>
+
+          <Button
+            asChild
+            variant="outline"
             size="sm"
           >
             <Link
@@ -1028,225 +1187,89 @@ function PatientSymptomCheckerPage() {
                   patientId,
               }}
             >
-              <ArrowLeft className="mr-2 size-4" />
-
-              Back to{" "}
-              {patient.name}'s History
+              <BarChartIcon />
+              View History
             </Link>
           </Button>
+
         </div>
 
         {/* ---------------------------------------------------------------- */}
-        {/* PATIENT HEADER                                                    */}
+        {/* Patient Context Header                                            */}
         {/* ---------------------------------------------------------------- */}
 
-        <section className="flex items-start gap-4">
-          <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <UserRound className="size-6" />
-          </div>
+        <Card className="overflow-hidden">
 
-          <div className="min-w-0 flex-1">
-            <p className="text-sm text-muted-foreground">
-              Patient Symptom Checker
-            </p>
+          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
 
-            <h1 className="truncate text-2xl font-semibold tracking-tight sm:text-3xl">
-              {patient.name}
-            </h1>
+            <div className="flex items-center gap-4">
 
-            <p className="mt-1 text-sm text-muted-foreground">
-              {[
-                patient.age,
-                patient.sex,
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </p>
-          </div>
-        </section>
+              <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <UserRound className="size-6" />
+              </div>
 
-        {/* ---------------------------------------------------------------- */}
-        {/* SEPARATION NOTICE                                                 */}
-        {/* ---------------------------------------------------------------- */}
+              <div className="min-w-0">
 
-        <div className="rounded-xl border bg-muted/40 px-4 py-3">
-          <div className="flex items-start gap-3">
-            <Info className="mt-0.5 size-4 shrink-0 text-primary" />
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Symptom check for
+                </p>
 
-            <p className="text-sm leading-6 text-muted-foreground">
-              This symptom check is
-              being performed
-              specifically for{" "}
-              <span className="font-medium text-foreground">
-                {patient.name}
-              </span>
-              . Their profile and
-              symptom history are
-              kept separate from
-              your own self-check
-              history.
-            </p>
-          </div>
-        </div>
+                <h1 className="mt-1 truncate font-display text-2xl">
+                  {patientName}
+                </h1>
+
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Patient profile information
+                  will be considered as context
+                  for this assessment.
+                </p>
+
+              </div>
+
+            </div>
+
+            <Badge
+              variant="secondary"
+              className="w-fit shrink-0"
+            >
+              Patient Check
+            </Badge>
+
+          </CardContent>
+        </Card>
 
         {/* ---------------------------------------------------------------- */}
-        {/* PROGRESS                                                          */}
+        {/* Intake                                                            */}
         {/* ---------------------------------------------------------------- */}
 
         {stage ===
-          "questions" && (
+        "intake" ? (
           <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between gap-4 text-sm">
-                <span className="font-medium">
-                  Follow-up questions
-                </span>
 
-                <span className="text-muted-foreground">
-                  {step + 1} /{" "}
-                  {questions.length}
-                </span>
-              </div>
-
-              <Progress
-                value={
-                  questionProgress
-                }
-                className="mt-3"
-              />
-            </CardContent>
-          </Card>
-        )}
-
-        {/* ---------------------------------------------------------------- */}
-        {/* GLOBAL ERROR                                                      */}
-        {/* ---------------------------------------------------------------- */}
-
-        {formError && (
-          <Alert
-            variant="destructive"
-            role="alert"
-          >
-            <AlertTriangle className="size-4" />
-
-            <AlertTitle>
-              Something went wrong
-            </AlertTitle>
-
-            <AlertDescription>
-              {formError}
-            </AlertDescription>
-          </Alert>
-        )}
-
-        {/* ================================================================= */}
-        {/*                            INTAKE                                  */}
-        {/* ================================================================= */}
-
-        {stage ===
-          "intake" && (
-          <Card className="overflow-hidden">
             <CardHeader>
-              <div className="flex items-center gap-3">
-                <div className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                  <HeartPulse className="size-5" />
-                </div>
 
-                <div>
-                  <CardTitle>
-                    Check{" "}
-                    {patient.name}'s
-                    symptoms
-                  </CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <HeartPulse className="size-5 text-primary" />
+                What symptoms does{" "}
+                {patientName}
+                have?
+              </CardTitle>
 
-                  <CardDescription>
-                    Describe the
-                    current problem
-                    as clearly as
-                    possible.
-                  </CardDescription>
-                </div>
-              </div>
+              <CardDescription>
+                Describe the symptoms in your
+                own words. The patient's saved
+                profile will be used as
+                background context.
+              </CardDescription>
+
             </CardHeader>
 
             <CardContent className="space-y-6">
 
-              {/* ---------------------------------------------------------- */}
-              {/* PATIENT INFORMATION                                         */}
-              {/* ---------------------------------------------------------- */}
-
-              <div className="rounded-xl border bg-muted/30 p-4">
-                <div className="mb-3 flex items-center gap-2">
-                  <UserRound className="size-4 text-primary" />
-
-                  <h2 className="text-sm font-semibold">
-                    Patient information
-                  </h2>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-
-                  <ProfileValue
-                    label="Name"
-                    value={
-                      patient.name
-                    }
-                  />
-
-                  <ProfileValue
-                    label="Age"
-                    value={
-                      patient.age ||
-                      "Not provided"
-                    }
-                  />
-
-                  <ProfileValue
-                    label="Sex"
-                    value={
-                      patient.sex ||
-                      "Not provided"
-                    }
-                  />
-
-                  <ProfileValue
-                    label="Existing condition"
-                    value={
-                      patient.existingConditions ||
-                      "Not provided"
-                    }
-                  />
-
-                  <ProfileValue
-                    label="Allergies"
-                    value={
-                      patient.allergies ||
-                      "Not provided"
-                    }
-                  />
-
-                  <ProfileValue
-                    label="Smoking status"
-                    value={
-                      patient.smokingStatus ||
-                      "Not provided"
-                    }
-                  />
-
-                </div>
-              </div>
-
-              <Separator />
-
-              {/* ---------------------------------------------------------- */}
-              {/* SYMPTOMS                                                     */}
-              {/* ---------------------------------------------------------- */}
-
               <div className="space-y-2">
+
                 <Label htmlFor="patient-symptoms">
-                  What symptoms is{" "}
-                  {patient.name}{" "}
-                  experiencing?
+                  Symptoms
                 </Label>
 
                 <Textarea
@@ -1262,44 +1285,20 @@ function PatientSymptomCheckerPage() {
                         .value,
                     )
                   }
-                  placeholder="For example: fever, sore throat, cough, headache…"
+                  placeholder="For example: fever, sore throat and tiredness…"
                   className="min-h-32 resize-y"
-                  maxLength={2000}
                   disabled={
                     immediateMutation.isPending ||
-                    questionsMutation.isPending ||
-                    assessmentMutation.isPending
+                    questionsMutation.isPending
                   }
                 />
 
-                <div className="flex justify-between gap-3 text-xs text-muted-foreground">
-                  <span>
-                    Include the
-                    main symptoms,
-                    where they
-                    occur, and
-                    anything that
-                    feels unusual.
-                  </span>
-
-                  <span className="shrink-0">
-                    {
-                      symptoms.length
-                    }
-                    /2000
-                  </span>
-                </div>
               </div>
 
-              {/* ---------------------------------------------------------- */}
-              {/* DURATION                                                     */}
-              {/* ---------------------------------------------------------- */}
-
               <div className="space-y-2">
+
                 <Label htmlFor="patient-duration">
-                  How long has
-                  this been
-                  happening?
+                  How long has this been happening?
                 </Label>
 
                 <Input
@@ -1315,66 +1314,51 @@ function PatientSymptomCheckerPage() {
                         .value,
                     )
                   }
-                  placeholder="For example: 2 days, since yesterday, 3 weeks…"
-                  maxLength={60}
+                  placeholder="For example: 2 days"
                   disabled={
                     immediateMutation.isPending ||
-                    questionsMutation.isPending ||
-                    assessmentMutation.isPending
+                    questionsMutation.isPending
                   }
                 />
 
-                <p className="text-xs text-muted-foreground">
-                  A duration helps
-                  the assessment
-                  understand how
-                  the symptoms have
-                  developed.
-                </p>
               </div>
 
-              {/* ---------------------------------------------------------- */}
-              {/* BACKGROUND NOTICE                                            */}
-              {/* ---------------------------------------------------------- */}
+              {formError ? (
+                <Alert
+                  variant="destructive"
+                >
+                  <AlertTriangle className="size-4" />
 
-              <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
-                <div className="flex items-start gap-3">
-                  <ShieldAlert className="mt-0.5 size-4 shrink-0 text-primary" />
+                  <AlertTitle>
+                    Please check the
+                    information
+                  </AlertTitle>
 
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium">
-                      Patient profile
-                      is used as
-                      background
-                      context
-                    </p>
+                  <AlertDescription>
+                    {
+                      formError
+                    }
+                  </AlertDescription>
+                </Alert>
+              ) : null}
 
-                    <p className="text-xs leading-5 text-muted-foreground">
-                      Existing
-                      conditions,
-                      medicines,
-                      allergies,
-                      previous
-                      illnesses,
-                      smoking
-                      history and
-                      family history
-                      help
-                      contextualize
-                      the assessment.
-                      They are not
-                      automatically
-                      treated as
-                      current
-                      symptoms.
-                    </p>
-                  </div>
-                </div>
-              </div>
+              <Alert>
+                <Info className="size-4" />
 
-              {/* ---------------------------------------------------------- */}
-              {/* START                                                        */}
-              {/* ---------------------------------------------------------- */}
+                <AlertTitle>
+                  Patient context
+                </AlertTitle>
+
+                <AlertDescription>
+                  Existing conditions,
+                  medications, allergies,
+                  previous illnesses and
+                  other profile information
+                  are background context. They
+                  are not automatically treated
+                  as current symptoms.
+                </AlertDescription>
+              </Alert>
 
               <Button
                 className="w-full"
@@ -1389,170 +1373,119 @@ function PatientSymptomCheckerPage() {
                 }
               >
                 {immediateMutation.isPending ||
-                questionsMutation.isPending ? (
+                questionsMutation.isPending ||
+                assessmentMutation.isPending ? (
                   <>
                     <Loader2 className="mr-2 size-4 animate-spin" />
-
-                    Preparing
-                    symptom
-                    check…
+                    Assessing…
                   </>
                 ) : (
                   <>
-                    <HeartPulse className="mr-2 size-4" />
-
-                    Start Symptom
-                    Check
+                    <MessageCircleQuestion className="mr-2 size-4" />
+                    Continue
                   </>
                 )}
               </Button>
 
-              <p className="text-center text-xs leading-5 text-muted-foreground">
-                This tool provides
-                symptom assessment
-                and care guidance.
-                It does not provide
-                a definitive medical
-                diagnosis.
-              </p>
             </CardContent>
           </Card>
-        )}
+        ) : null}
 
-        {/* ================================================================= */}
-        {/*                           QUESTIONS                                */}
-        {/* ================================================================= */}
+        {/* ---------------------------------------------------------------- */}
+        {/* Follow-Up Questions                                               */}
+        {/* ---------------------------------------------------------------- */}
 
         {stage ===
-          "questions" &&
-          currentQuestion && (
-            <Card className="overflow-hidden">
-              <CardHeader>
-                <div className="flex items-center gap-3">
-                  <div className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                    <MessageCircleQuestion className="size-5" />
-                  </div>
+        "questions" ? (
+          <Card>
 
-                  <div>
-                    <CardTitle>
-                      A few more
-                      questions
-                    </CardTitle>
+            <CardHeader>
 
-                    <CardDescription>
-                      These
-                      questions are
-                      selected for{" "}
-                      {
-                        patient.name
-                      }
-                      's current
-                      symptoms.
-                    </CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
+              <div className="flex items-center justify-between gap-4">
 
-              <CardContent className="space-y-6">
+                <div>
 
-                {/* -------------------------------------------------------- */}
-                {/* QUESTION                                                   */}
-                {/* -------------------------------------------------------- */}
+                  <CardTitle className="flex items-center gap-2">
+                    <MessageCircleQuestion className="size-5 text-primary" />
+                    A few follow-up questions
+                  </CardTitle>
 
-                <div className="rounded-xl border bg-muted/30 p-5">
-                  <p className="text-lg font-medium leading-7">
-                    {
-                      currentQuestion.question
-                    }
-                  </p>
+                  <CardDescription>
+                    These questions help
+                    refine the symptom
+                    assessment for{" "}
+                    {patientName}.
+                  </CardDescription>
 
-                  {currentQuestion.why && (
-                    <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                      {
-                        currentQuestion.why
-                      }
-                    </p>
-                  )}
                 </div>
 
-                {/* -------------------------------------------------------- */}
-                {/* OPTIONS                                                    */}
-                {/* -------------------------------------------------------- */}
+                <Badge variant="secondary">
+                  {step + 1} /{" "}
+                  {
+                    questions.length
+                  }
+                </Badge>
 
-                {currentQuestion.options &&
-                currentQuestion
-                  .options
-                  .length >
-                  0 ? (
-                  <div
-                    className="grid gap-3"
-                    role="radiogroup"
-                    aria-label="Answer options"
-                  >
-                    {currentQuestion.options.map(
-                      (
-                        option,
-                      ) => {
-                        const selected =
-                          currentAnswer ===
-                          option;
+              </div>
 
-                        return (
-                          <button
-                            key={
-                              option
-                            }
-                            type="button"
-                            onClick={() =>
-                              setCurrentAnswer(
-                                option,
-                              )
-                            }
-                            className={[
-                              "w-full rounded-xl border px-4 py-4 text-left text-sm transition",
-                              "hover:border-primary/50 hover:bg-primary/5",
-                              selected
-                                ? "border-primary bg-primary/10 text-foreground shadow-sm"
-                                : "bg-card",
-                            ].join(
-                              " ",
-                            )}
-                            role="radio"
-                            aria-checked={
-                              selected
-                            }
-                          >
-                            <div className="flex items-center gap-3">
-                              <div
-                                className={[
-                                  "flex size-5 shrink-0 items-center justify-center rounded-full border",
-                                  selected
-                                    ? "border-primary"
-                                    : "border-muted-foreground/40",
-                                ].join(
-                                  " ",
-                                )}
-                              >
-                                {selected && (
-                                  <div className="size-2.5 rounded-full bg-primary" />
-                                )}
-                              </div>
+              <Progress
+                value={
+                  ((step + 1) /
+                    questions.length) *
+                  100
+                }
+                className="mt-4"
+              />
 
-                              <span>
-                                {
-                                  option
-                                }
-                              </span>
-                            </div>
-                          </button>
-                        );
-                      },
-                    )}
+            </CardHeader>
+
+            <CardContent className="space-y-6">
+
+              {questions[
+                step
+              ] ? (
+                <>
+                  <div className="rounded-xl border bg-muted/30 p-5">
+
+                    <div className="flex gap-3">
+
+                      <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                        <MessageCircleQuestion className="size-4" />
+                      </div>
+
+                      <div>
+
+                        <p className="text-base font-medium leading-7">
+                          {
+                            questions[
+                              step
+                            ]
+                              .question
+                          }
+                        </p>
+
+                        {questions[
+                          step
+                        ].help ? (
+                          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                            {
+                              questions[
+                                step
+                              ].help
+                            }
+                          </p>
+                        ) : null}
+
+                      </div>
+
+                    </div>
+
                   </div>
-                ) : (
+
                   <div className="space-y-2">
+
                     <Label htmlFor="patient-answer">
-                      Patient's answer
+                      Answer
                     </Label>
 
                     <Textarea
@@ -1568,144 +1501,107 @@ function PatientSymptomCheckerPage() {
                             .value,
                         )
                       }
-                      placeholder="Type the patient's answer…"
-                      className="min-h-28 resize-y"
-                      maxLength={4000}
+                      placeholder="Enter the patient's answer…"
+                      className="min-h-28"
+                      autoFocus
                     />
+
                   </div>
-                )}
 
-                {/* -------------------------------------------------------- */}
-                {/* NAVIGATION                                                 */}
-                {/* -------------------------------------------------------- */}
+                  <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
 
-                <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      if (
-                        step ===
-                        0
-                      ) {
-                        setStage(
-                          "intake",
-                        );
-
-                        return;
+                    <Button
+                      variant="outline"
+                      onClick={
+                        previousQuestion
                       }
+                      disabled={
+                        step ===
+                          0 ||
+                        assessmentMutation.isPending ||
+                        immediateMutation.isPending
+                      }
+                    >
+                      <ChevronLeft className="mr-2 size-4" />
+                      Previous
+                    </Button>
 
-                      setStep(
-                        (
-                          value,
-                        ) =>
-                          value -
-                          1,
-                      );
+                    <Button
+                      onClick={
+                        submitAnswer
+                      }
+                      disabled={
+                        !currentAnswer.trim() ||
+                        immediateMutation.isPending ||
+                        assessmentMutation.isPending
+                      }
+                    >
+                      {immediateMutation.isPending ||
+                      assessmentMutation.isPending ? (
+                        <>
+                          <Loader2 className="mr-2 size-4 animate-spin" />
+                          Checking…
+                        </>
+                      ) : step ===
+                        questions.length -
+                          1 ? (
+                        <>
+                          <Stethoscope className="mr-2 size-4" />
+                          Get Assessment
+                        </>
+                      ) : (
+                        <>
+                          Next
+                          <ChevronRight className="ml-2 size-4" />
+                        </>
+                      )}
+                    </Button>
 
-                      setAnswers(
-                        (
-                          current,
-                        ) =>
-                          current.slice(
-                            0,
-                            -1,
-                          ),
-                      );
+                  </div>
+                </>
+              ) : null}
 
-                      setCurrentAnswer(
-                        "",
-                      );
-                    }}
-                  >
-                    <ChevronLeft className="mr-2 size-4" />
+            </CardContent>
+          </Card>
+        ) : null}
 
-                    Back
-                  </Button>
-
-                  <Button
-                    onClick={
-                      submitAnswer
-                    }
-                    disabled={
-                      immediateMutation.isPending ||
-                      assessmentMutation.isPending
-                    }
-                  >
-                    {immediateMutation.isPending ||
-                    assessmentMutation.isPending ? (
-                      <>
-                        <Loader2 className="mr-2 size-4 animate-spin" />
-
-                        Checking…
-                      </>
-                    ) : step <
-                      questions.length -
-                        1 ? (
-                      <>
-                        Next
-                        question
-
-                        <ChevronRight className="ml-2 size-4" />
-                      </>
-                    ) : (
-                      <>
-                        <Stethoscope className="mr-2 size-4" />
-
-                        View
-                        Assessment
-                      </>
-                    )}
-                  </Button>
-                </div>
-
-                <p className="text-center text-xs text-muted-foreground">
-                  Only the
-                  patient's actual
-                  answer is used as
-                  patient-reported
-                  information. The
-                  question itself is
-                  not treated as a
-                  symptom.
-                </p>
-              </CardContent>
-            </Card>
-          )}
-
-        {/* ================================================================= */}
-        {/*                              RESULT                                */}
-        {/* ================================================================= */}
+        {/* ---------------------------------------------------------------- */}
+        {/* Result                                                            */}
+        {/* ---------------------------------------------------------------- */}
 
         {stage ===
           "result" &&
-          assessment && (
-            <PatientAssessmentResult
-              patientId={
-                patientId
-              }
-              patientName={
-                patient.name
-              }
-              assessment={
-                assessment
-              }
-              savedId={
-                savedId
-              }
-              saveError={
-                saveError
-              }
-              savePending={
-                saveMutation.isPending
-              }
-              onSave={
-                saveResult
-              }
-              onNewCheck={
-                resetCheck
-              }
-            />
-          )}
+        assessment ? (
+          <PatientResult
+            assessment={
+              assessment
+            }
+            patientName={
+              patientName
+            }
+            matchStrength={
+              matchStrength
+            }
+            savedId={
+              savedId
+            }
+            saveError={
+              saveError
+            }
+            isSaving={
+              saveMutation.isPending
+            }
+            onSave={
+              saveResult
+            }
+            onReset={
+              reset
+            }
+            patientId={
+              patientId
+            }
+          />
+        ) : null}
 
       </div>
     </main>
@@ -1713,56 +1609,43 @@ function PatientSymptomCheckerPage() {
 }
 
 /* -------------------------------------------------------------------------- */
-/*                         PATIENT PROFILE VALUE                              */
+/*                             Result Component                               */
 /* -------------------------------------------------------------------------- */
 
-function ProfileValue({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-lg border bg-background/50 px-3 py-2.5">
-      <p className="text-xs text-muted-foreground">
-        {label}
-      </p>
-
-      <p className="mt-0.5 text-sm font-medium">
-        {value}
-      </p>
-    </div>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/*                         RESULT COMPONENT                                   */
-/* -------------------------------------------------------------------------- */
-
-function PatientAssessmentResult({
-  patientId,
-  patientName,
+function PatientResult({
   assessment,
+  patientName,
+  matchStrength,
   savedId,
   saveError,
-  savePending,
+  isSaving,
   onSave,
-  onNewCheck,
+  onReset,
+  patientId,
 }: {
-  patientId: string;
-  patientName: string;
   assessment: Assessment;
+  patientName: string;
+  matchStrength: number;
   savedId: string | null;
   saveError: string | null;
-  savePending: boolean;
+  isSaving: boolean;
   onSave: () => void;
-  onNewCheck: () => void;
+  onReset: () => void;
+  patientId: string;
 }) {
-  const top =
-    topCondition(
-      assessment,
-    );
+  const topCondition =
+    assessment.conditions?.length
+      ? [
+          ...assessment.conditions,
+        ].sort(
+          (
+            a,
+            b,
+          ) =>
+            b.likelihood -
+            a.likelihood,
+        )[0] ?? null
+      : null;
 
   const isEmergency =
     assessment.urgency ===
@@ -1772,663 +1655,411 @@ function PatientAssessmentResult({
     assessment.urgency ===
     "urgent";
 
+  const urgencyLabel =
+    getUrgencyLabel(
+      assessment.urgency,
+    );
+
   return (
     <div className="space-y-6">
 
       {/* ------------------------------------------------------------------ */}
-      {/* RESULT HEADER                                                       */}
+      {/* Emergency / Urgency Alert                                           */}
       {/* ------------------------------------------------------------------ */}
 
-      <Card
-        className={
-          isEmergency
-            ? "border-destructive/50 bg-destructive/5"
-            : "overflow-hidden"
-        }
-      >
+      {isEmergency ? (
+        <Alert
+          variant="destructive"
+          className="border-destructive/50"
+        >
+          <ShieldAlert className="size-5" />
+
+          <AlertTitle>
+            Emergency attention may be needed
+          </AlertTitle>
+
+          <AlertDescription className="mt-2 leading-6">
+            The responses indicate
+            features that may require
+            immediate medical attention.
+            Please contact local emergency
+            services or seek emergency care
+            now.
+          </AlertDescription>
+        </Alert>
+      ) : isUrgent ? (
+        <Alert>
+          <AlertTriangle className="size-5" />
+
+          <AlertTitle>
+            Urgent medical attention may be appropriate
+          </AlertTitle>
+
+          <AlertDescription className="mt-2 leading-6">
+            The assessment suggests that
+            prompt medical evaluation may
+            be appropriate.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Result Header                                                       */}
+      {/* ------------------------------------------------------------------ */}
+
+      <Card>
+
         <CardHeader>
+
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div
-                className={[
-                  "flex size-11 shrink-0 items-center justify-center rounded-xl",
-                  isEmergency
-                    ? "bg-destructive/10 text-destructive"
-                    : "bg-primary/10 text-primary",
-                ].join(
-                  " ",
-                )}
-              >
-                {isEmergency ? (
-                  <ShieldAlert className="size-6" />
-                ) : (
-                  <CheckCircle2 className="size-6" />
-                )}
-              </div>
 
-              <div>
-                <p className="text-sm text-muted-foreground">
-                  Symptom assessment
-                  for
-                </p>
+            <div>
 
-                <CardTitle className="mt-1">
-                  {
-                    patientName
-                  }
+              <div className="flex items-center gap-2">
+
+                <CheckCircle2 className="size-5 text-primary" />
+
+                <CardTitle>
+                  Symptom Assessment
                 </CardTitle>
 
-                <CardDescription className="mt-1">
-                  Review the
-                  information below
-                  and use the care
-                  guidance as
-                  decision support.
-                </CardDescription>
               </div>
+
+              <CardDescription className="mt-2">
+                Assessment for{" "}
+                <span className="font-medium text-foreground">
+                  {patientName}
+                </span>
+              </CardDescription>
+
             </div>
 
             <Badge
-              className={[
-                "w-fit border",
-                urgencyClass(
-                  assessment.urgency,
-                ),
-              ].join(
-                " ",
-              )}
-              variant="outline"
+              variant={
+                isEmergency
+                  ? "destructive"
+                  : isUrgent
+                    ? "destructive"
+                    : "secondary"
+              }
             >
-              {formatUrgency(
-                assessment.urgency,
-              )}
+              {urgencyLabel}
             </Badge>
+
           </div>
+
         </CardHeader>
 
-        <CardContent className="space-y-5">
+        <CardContent className="space-y-6">
 
           {/* -------------------------------------------------------------- */}
-          {/* EMERGENCY                                                       */}
+          {/* Match Strength                                                  */}
           {/* -------------------------------------------------------------- */}
 
-          {isEmergency && (
-            <Alert
-              variant="destructive"
-              className="border-destructive/40"
-            >
-              <ShieldAlert className="size-4" />
+          <div className="rounded-xl border bg-muted/30 p-5">
 
-              <AlertTitle>
-                Emergency care may
-                be needed
-              </AlertTitle>
+            <div className="flex items-start justify-between gap-4">
 
-              <AlertDescription className="leading-6">
-                The safety screening
-                found information
-                that warrants
-                emergency attention.
-                Please seek emergency
-                medical care now
-                rather than relying on
-                this assessment.
-              </AlertDescription>
-            </Alert>
-          )}
+              <div>
 
-          {/* -------------------------------------------------------------- */}
-          {/* URGENT                                                         */}
-          {/* -------------------------------------------------------------- */}
+                <p className="text-sm font-medium">
+                  Symptom Match Strength
+                </p>
 
-          {!isEmergency &&
-            isUrgent && (
-              <Alert className="border-orange-500/30 bg-orange-500/5">
-                <AlertTriangle className="size-4 text-orange-300" />
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  A relative strength of the
+                  symptom pattern match in
+                  this assessment.
+                </p>
 
-                <AlertTitle>
-                  Prompt medical
-                  attention
-                </AlertTitle>
+              </div>
 
-                <AlertDescription className="leading-6">
-                  The available
-                  information suggests
-                  that prompt medical
-                  evaluation may be
-                  appropriate. This is
-                  different from an
-                  emergency
-                  classification.
-                </AlertDescription>
-              </Alert>
-            )}
+              <div className="text-right">
 
-          {/* -------------------------------------------------------------- */}
-          {/* SUMMARY                                                         */}
-          {/* -------------------------------------------------------------- */}
+                <p className="text-2xl font-semibold">
+                  {formatMatchStrength(
+                    matchStrength,
+                  )}
+                  %
+                </p>
 
-          <div className="rounded-xl border bg-muted/30 p-4">
-            <div className="flex items-center gap-2">
-              <Activity className="size-4 text-primary" />
+              </div>
 
-              <h2 className="text-sm font-semibold">
-                Assessment summary
-              </h2>
             </div>
 
-            <p className="mt-3 text-sm leading-7 text-foreground">
-              {
-                assessment.summary
+            <Progress
+              value={
+                matchStrength
               }
-            </p>
+              className="mt-4"
+            />
 
-            {assessment.urgencyReason && (
-              <div className="mt-4 rounded-lg border bg-background/60 px-4 py-3">
-                <p className="text-xs font-medium text-muted-foreground">
-                  Why this urgency
-                  level was selected
-                </p>
-
-                <p className="mt-1 text-sm leading-6">
-                  {
-                    assessment.urgencyReason
-                  }
-                </p>
-              </div>
-            )}
           </div>
 
           {/* -------------------------------------------------------------- */}
-          {/* TOP CONDITION                                                   */}
+          {/* Possible Match                                                  */}
           {/* -------------------------------------------------------------- */}
 
-          {top && (
-            <Card className="border-primary/20 bg-primary/5">
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <CardTitle className="text-lg">
-                      Most closely
-                      matching
-                      possibility
-                    </CardTitle>
+          {topCondition ? (
+            <div>
 
-                    <CardDescription className="mt-1">
-                      This is a symptom
-                      match, not a
-                      confirmed
-                      diagnosis.
-                    </CardDescription>
-                  </div>
-
-                  <Badge
-                    variant="secondary"
-                    className="shrink-0"
-                  >
-                    {
-                      clampMatchStrength(
-                        top.likelihood,
-                      )
-                    }
-                    % match
-                  </Badge>
-                </div>
-              </CardHeader>
-
-              <CardContent>
-                <h3 className="text-base font-semibold">
-                  {top.name}
-                </h3>
-
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  {
-                    top.explanation
-                  }
-                </p>
-
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Badge
-                    variant="outline"
-                    className={[
-                      "border",
-                      riskClass(
-                        top.riskLevel,
-                      ),
-                    ].join(
-                      " ",
-                    )}
-                  >
-                    Risk level:{" "}
-                    {
-                      top.riskLevel
-                    }
-                  </Badge>
-
-                  {top.matchingSymptoms
-                    ?.slice(
-                      0,
-                      4,
-                    )
-                    .map(
-                      (
-                        symptom,
-                      ) => (
-                        <Badge
-                          key={
-                            symptom
-                          }
-                          variant="secondary"
-                        >
-                          {
-                            symptom
-                          }
-                        </Badge>
-                      ),
-                    )}
-                </div>
-
-                {top.riskRationale && (
-                  <div className="mt-4 rounded-lg bg-background/60 px-4 py-3">
-                    <p className="text-xs font-medium text-muted-foreground">
-                      Risk context
-                    </p>
-
-                    <p className="mt-1 text-sm leading-6">
-                      {
-                        top.riskRationale
-                      }
-                    </p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* -------------------------------------------------------------- */}
-          {/* OTHER POSSIBILITIES                                             */}
-          {/* -------------------------------------------------------------- */}
-
-          {assessment.conditions.length >
-            1 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">
-                  Other possible
-                  explanations
-                </CardTitle>
-
-                <CardDescription>
-                  These are ranked by
-                  symptom match
-                  strength and are not
-                  confirmed diagnoses.
-                </CardDescription>
-              </CardHeader>
-
-              <CardContent className="space-y-3">
-                {assessment.conditions
-                  .slice(
-                    1,
-                    5,
-                  )
-                  .map(
-                    (
-                      condition,
-                    ) => (
-                      <div
-                        key={
-                          condition.name
-                        }
-                        className="rounded-xl border p-4"
-                      >
-                        <div className="flex items-start justify-between gap-4">
-                          <div>
-                            <h3 className="font-medium">
-                              {
-                                condition.name
-                              }
-                            </h3>
-
-                            <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                              {
-                                condition.explanation
-                              }
-                            </p>
-                          </div>
-
-                          <Badge
-                            variant="secondary"
-                            className="shrink-0"
-                          >
-                            {
-                              clampMatchStrength(
-                                condition.likelihood,
-                              )
-                            }
-                            %
-                          </Badge>
-                        </div>
-                      </div>
-                    ),
-                  )}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* -------------------------------------------------------------- */}
-          {/* RED FLAGS                                                       */}
-          {/* -------------------------------------------------------------- */}
-
-          {assessment.redFlags &&
-            assessment.redFlags.length >
-              0 && (
-              <Card className="border-destructive/30">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <AlertTriangle className="size-5 text-destructive" />
-
-                    Safety findings
-                  </CardTitle>
-
-                  <CardDescription>
-                    These findings should
-                    be taken seriously
-                    when deciding what
-                    care is appropriate.
-                  </CardDescription>
-                </CardHeader>
-
-                <CardContent>
-                  <ul className="space-y-2">
-                    {assessment.redFlags.map(
-                      (
-                        flag,
-                      ) => (
-                        <li
-                          key={
-                            flag
-                          }
-                          className="flex items-start gap-2 text-sm leading-6"
-                        >
-                          <span className="mt-2 size-1.5 shrink-0 rounded-full bg-destructive" />
-
-                          <span>
-                            {
-                              flag
-                            }
-                          </span>
-                        </li>
-                      ),
-                    )}
-                  </ul>
-                </CardContent>
-              </Card>
-            )}
-
-          {/* -------------------------------------------------------------- */}
-          {/* GENERAL ADVICE                                                  */}
-          {/* -------------------------------------------------------------- */}
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <Stethoscope className="size-5 text-primary" />
-
-                General advice
-              </CardTitle>
-            </CardHeader>
-
-            <CardContent>
-              <p className="text-sm leading-7">
-                {
-                  assessment.generalAdvice
-                }
+              <p className="text-sm font-medium text-muted-foreground">
+                Strongest symptom pattern match
               </p>
-            </CardContent>
-          </Card>
 
-          {/* -------------------------------------------------------------- */}
-          {/* SELF CARE / NEXT STEPS                                          */}
-          {/* -------------------------------------------------------------- */}
-
-          {top && (
-            <div className="grid gap-4 md:grid-cols-2">
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">
-                    What may help
-                  </CardTitle>
-                </CardHeader>
-
-                <CardContent>
-                  {top.selfCare &&
-                  top.selfCare.length >
-                    0 ? (
-                    <ul className="space-y-2">
-                      {top.selfCare.map(
-                        (
-                          item,
-                        ) => (
-                          <li
-                            key={
-                              item
-                            }
-                            className="flex items-start gap-2 text-sm leading-6 text-muted-foreground"
-                          >
-                            <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-primary" />
-
-                            <span>
-                              {
-                                item
-                              }
-                            </span>
-                          </li>
-                        ),
-                      )}
-                    </ul>
-                  ) : (
-                    <p className="text-sm leading-6 text-muted-foreground">
-                      Follow the
-                      general advice
-                      above and
-                      monitor the
-                      symptoms.
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">
-                    Recommended
-                    next step
-                  </CardTitle>
-                </CardHeader>
-
-                <CardContent>
-                  <p className="text-sm leading-6 text-muted-foreground">
-                    {
-                      top.nextSteps
-                    }
-                  </p>
-                </CardContent>
-              </Card>
-
-            </div>
-          )}
-
-          {/* -------------------------------------------------------------- */}
-          {/* CONFIDENCE                                                      */}
-          {/* -------------------------------------------------------------- */}
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-start gap-3">
-                <Info className="mt-0.5 size-4 shrink-0 text-primary" />
+              <div className="mt-2 flex flex-col gap-2 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between">
 
                 <div>
-                  <p className="text-sm font-medium">
-                    Assessment
-                    confidence:{" "}
-                    {
-                      assessment.confidence
-                    }
-                  </p>
 
-                  {assessment.confidenceNote && (
+                  <h2 className="text-lg font-semibold">
+                    {
+                      topCondition.name
+                    }
+                  </h2>
+
+                  {topCondition.description ? (
                     <p className="mt-1 text-sm leading-6 text-muted-foreground">
                       {
-                        assessment.confidenceNote
+                        topCondition.description
                       }
                     </p>
-                  )}
+                  ) : null}
 
-                  {assessment.missingInfo &&
-                    assessment.missingInfo.length >
-                      0 && (
-                      <div className="mt-3">
-                        <p className="text-xs font-medium text-muted-foreground">
-                          Information that
-                          may improve
-                          the assessment
-                        </p>
-
-                        <ul className="mt-2 space-y-1">
-                          {assessment.missingInfo
-                            .slice(
-                              0,
-                              5,
-                            )
-                            .map(
-                              (
-                                item,
-                              ) => (
-                                <li
-                                  key={
-                                    item
-                                  }
-                                  className="text-xs text-muted-foreground"
-                                >
-                                  •{" "}
-                                  {
-                                    item
-                                  }
-                                </li>
-                              ),
-                            )}
-                        </ul>
-                      </div>
-                    )}
                 </div>
+
+                <Badge variant="outline">
+                  {formatMatchStrength(
+                    topCondition.likelihood,
+                  )}
+                  % match
+                </Badge>
+
               </div>
-            </CardContent>
-          </Card>
+
+            </div>
+          ) : null}
 
           {/* -------------------------------------------------------------- */}
-          {/* MATCH STRENGTH NOTICE                                           */}
+          {/* Summary                                                         */}
           {/* -------------------------------------------------------------- */}
 
-          <div className="rounded-xl border bg-muted/40 px-4 py-3">
-            <p className="text-xs leading-5 text-muted-foreground">
-              The percentage shown
-              above is{" "}
-              <span className="font-medium text-foreground">
-                symptom match
-                strength
-              </span>
-              . It is not a calibrated
-              medical probability and
-              should not be interpreted
-              as a diagnosis.
-            </p>
-          </div>
+          {assessment.summary ? (
+            <div>
+
+              <h2 className="text-lg font-semibold">
+                Summary
+              </h2>
+
+              <p className="mt-2 text-sm leading-7 text-muted-foreground">
+                {
+                  assessment.summary
+                }
+              </p>
+
+            </div>
+          ) : null}
 
           {/* -------------------------------------------------------------- */}
-          {/* SAVE ERROR                                                      */}
+          {/* Supporting Factors                                              */}
           {/* -------------------------------------------------------------- */}
 
-          {saveError && (
+          {assessment.supportingFactors?.length ? (
+            <div>
+
+              <h2 className="text-lg font-semibold">
+                Supporting factors
+              </h2>
+
+              <ul className="mt-3 space-y-2">
+
+                {assessment.supportingFactors.map(
+                  (
+                    factor,
+                    index,
+                  ) => (
+                    <li
+                      key={`${factor}-${index}`}
+                      className="flex gap-2 text-sm leading-6 text-muted-foreground"
+                    >
+                      <span className="mt-2 size-1.5 shrink-0 rounded-full bg-primary" />
+
+                      <span>
+                        {
+                          factor
+                        }
+                      </span>
+                    </li>
+                  ),
+                )}
+
+              </ul>
+
+            </div>
+          ) : null}
+
+          {/* -------------------------------------------------------------- */}
+          {/* Red Flags                                                       */}
+          {/* -------------------------------------------------------------- */}
+
+          {assessment.redFlags?.length ? (
             <Alert
-              variant="destructive"
-              role="alert"
+              variant={
+                isEmergency
+                  ? "destructive"
+                  : "default"
+              }
             >
               <AlertTriangle className="size-4" />
 
               <AlertTitle>
-                Could not save this
-                check
+                Warning signs
               </AlertTitle>
 
               <AlertDescription>
-                {saveError}
+
+                <ul className="mt-2 space-y-1">
+
+                  {assessment.redFlags.map(
+                    (
+                      flag,
+                      index,
+                    ) => (
+                      <li
+                        key={`${flag}-${index}`}
+                        className="leading-6"
+                      >
+                        •{" "}
+                        {
+                          flag
+                        }
+                      </li>
+                    ),
+                  )}
+
+                </ul>
+
               </AlertDescription>
             </Alert>
-          )}
+          ) : null}
 
           {/* -------------------------------------------------------------- */}
-          {/* SAVE SUCCESS                                                    */}
+          {/* Next Step                                                       */}
           {/* -------------------------------------------------------------- */}
 
-          {savedId && (
-            <Alert className="border-primary/30 bg-primary/5">
-              <CheckCircle2 className="size-4 text-primary" />
+          {assessment.nextStep ? (
+            <div className="rounded-xl border p-5">
+
+              <div className="flex gap-3">
+
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                  <Stethoscope className="size-4" />
+                </div>
+
+                <div>
+
+                  <h2 className="font-semibold">
+                    Suggested next step
+                  </h2>
+
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                    {
+                      assessment.nextStep
+                    }
+                  </p>
+
+                </div>
+
+              </div>
+
+            </div>
+          ) : null}
+
+          {/* -------------------------------------------------------------- */}
+          {/* Uncertainty                                                     */}
+          {/* -------------------------------------------------------------- */}
+
+          {assessment.uncertainty ? (
+            <div className="rounded-lg bg-muted/50 px-4 py-3 text-xs leading-5 text-muted-foreground">
+              <span className="font-medium text-foreground">
+                Important:
+              </span>{" "}
+              {
+                assessment.uncertainty
+              }
+            </div>
+          ) : null}
+
+          <Separator />
+
+          {/* -------------------------------------------------------------- */}
+          {/* Save                                                            */}
+          {/* -------------------------------------------------------------- */}
+
+          {!savedId ? (
+            <div className="space-y-3">
+
+              <Button
+                className="w-full"
+                size="lg"
+                onClick={
+                  onSave
+                }
+                disabled={
+                  isSaving
+                }
+              >
+                {isSaving ? (
+                  <>
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                    Saving…
+                  </>
+                ) : (
+                  <>
+                    <Save className="mr-2 size-4" />
+                    Save to {patientName}'s History
+                  </>
+                )}
+              </Button>
+
+              {saveError ? (
+                <p
+                  className="text-center text-xs text-destructive"
+                  role="alert"
+                >
+                  {
+                    saveError
+                  }
+                </p>
+              ) : null}
+
+            </div>
+          ) : (
+            <Alert>
+              <CheckCircle2 className="size-4" />
 
               <AlertTitle>
-                Symptom check saved
+                Saved successfully
               </AlertTitle>
 
               <AlertDescription>
-                This check has been
+                This assessment has been
                 saved only to{" "}
-                {patientName}'s
-                separate patient
-                history.
+                {patientName}'s private
+                symptom history.
               </AlertDescription>
             </Alert>
           )}
 
           {/* -------------------------------------------------------------- */}
-          {/* ACTIONS                                                         */}
+          {/* Navigation                                                      */}
           {/* -------------------------------------------------------------- */}
 
-          <div className="grid gap-3 sm:grid-cols-3">
-
-            <Button
-              onClick={
-                onSave
-              }
-              disabled={
-                savePending ||
-                Boolean(savedId)
-              }
-            >
-              {savePending ? (
-                <>
-                  <Loader2 className="mr-2 size-4 animate-spin" />
-
-                  Saving…
-                </>
-              ) : savedId ? (
-                <>
-                  <CheckCircle2 className="mr-2 size-4" />
-
-                  Saved
-                </>
-              ) : (
-                <>
-                  <Save className="mr-2 size-4" />
-
-                  Save Check
-                </>
-              )}
-            </Button>
+          <div className="flex flex-col gap-3 sm:flex-row">
 
             <Button
               asChild
               variant="outline"
+              className="flex-1"
             >
               <Link
                 to="/patient-history/$patient_ID"
@@ -2437,50 +2068,119 @@ function PatientAssessmentResult({
                     patientId,
                 }}
               >
-                <Activity className="mr-2 size-4" />
-
-                View History
+                <BarChartIcon />
+                View Patient History
               </Link>
             </Button>
 
             <Button
               variant="outline"
+              className="flex-1"
               onClick={
-                onNewCheck
+                onReset
               }
             >
-              <HeartPulse className="mr-2 size-4" />
-
-              New Check
+              <Activity className="mr-2 size-4" />
+              New Patient Check
             </Button>
 
           </div>
 
           {/* -------------------------------------------------------------- */}
-          {/* MEDICAL SAFETY                                                   */}
+          {/* Medical Safety Note                                             */}
           {/* -------------------------------------------------------------- */}
 
-          <div className="rounded-xl border border-border bg-muted/30 px-4 py-4">
-            <div className="flex items-start gap-3">
-              <Clock3 className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-
-              <p className="text-xs leading-5 text-muted-foreground">
-                This assessment is
-                decision support based
-                on the information
-                provided. It does not
-                replace a qualified
-                healthcare professional.
-                Do not stop or change
-                prescribed medication
-                based only on this
-                result.
-              </p>
-            </div>
+          <div className="rounded-lg bg-muted/50 px-4 py-3 text-xs leading-5 text-muted-foreground">
+            This assessment is for
+            informational and decision-support
+            purposes only. It is not a diagnosis
+            and does not replace evaluation by a
+            qualified healthcare professional.
+            Do not stop or change prescribed
+            medication based only on this result.
           </div>
 
         </CardContent>
       </Card>
+
     </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                           Small Bar Chart Icon                             */
+/* -------------------------------------------------------------------------- */
+
+function BarChartIcon() {
+  return (
+    <span className="mr-2 inline-flex">
+      <Activity className="size-4" />
+    </span>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                           Urgency Label                                    */
+/* -------------------------------------------------------------------------- */
+
+function getUrgencyLabel(
+  urgency: Assessment["urgency"],
+) {
+  switch (
+    urgency
+  ) {
+    case "emergency":
+      return "Emergency";
+
+    case "urgent":
+      return "Urgent";
+
+    case "see-a-doctor":
+      return "See a doctor";
+
+    case "self-care":
+      return "Self-care";
+
+    default:
+      return "Assessment";
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                         Match Strength Helpers                             */
+/* -------------------------------------------------------------------------- */
+
+function normalizeMatchStrength(
+  value: unknown,
+): number {
+  const numeric =
+    Number(value);
+
+  if (
+    !Number.isFinite(
+      numeric,
+    )
+  ) {
+    return 0;
+  }
+
+  return Math.round(
+    Math.max(
+      0,
+      Math.min(
+        100,
+        numeric,
+      ),
+    ),
+  );
+}
+
+function formatMatchStrength(
+  value: unknown,
+): string {
+  return String(
+    normalizeMatchStrength(
+      value,
+    ),
   );
 }
