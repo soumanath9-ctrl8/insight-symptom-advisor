@@ -802,8 +802,6 @@ function assessmentSystemPrompt(args: {
 
     profileContext
       ? [
-          "
-
           "PATIENT BACKGROUND:",
           profileContext,
           "",
