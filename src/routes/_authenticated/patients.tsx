@@ -235,7 +235,7 @@ function PatientsPage() {
         return updatePatientProfile({
           data: {
             id: editingPatient.id,
-            ...payload,
+            profile: payload,
           },
         });
       }
@@ -481,9 +481,9 @@ function PatientsPage() {
                   }
                   onCheckSymptoms={() =>
                     navigate({
-                      to: "/patient-checker/$patientId",
+                      to: "/patient-checker/$patient_ID",
                       params: {
-                        patientId: patient.id,
+                        patient_ID: patient.id,
                       },
                     })
                   }
@@ -1077,9 +1077,9 @@ function PatientCard({
             asChild
           >
             <Link
-              to="/patient-history/$patientId"
+              to="/patient-checker/$patient_ID"
               params={{
-                patientId: patient.id,
+                patient_ID: patient.id,
               }}
             >
               View History

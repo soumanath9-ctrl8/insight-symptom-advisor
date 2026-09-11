@@ -55,11 +55,11 @@ type DetectRedFlagsInput = {
    */
   answers?: RedFlagAnswer[];
 
-  age?: string;
+  age?: string | undefined;
 
-  duration?: string;
+  duration?: string | undefined;
 
-  language?: "en" | "bn";
+  language?: "en" | "bn" | undefined;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -380,6 +380,8 @@ function isMatchNegated(
         beforeNegations.length - 1
       ];
 
+    if (!nearest) return false;
+
     const absoluteNegationStart =
       beforeStart +
       nearest.index;
@@ -417,6 +419,8 @@ function isMatchNegated(
   if (afterNegations.length) {
     const nearest =
       afterNegations[0];
+
+    if (!nearest) return false;
 
     const absoluteNegationStart =
       matchEnd +

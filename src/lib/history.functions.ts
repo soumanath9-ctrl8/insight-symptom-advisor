@@ -83,7 +83,7 @@ const SaveCheckSchema = z.object({
     .default([]),
 
   vitals: z
-    .record(z.string(), z.unknown())
+    .record(z.string(), z.number())
     .optional()
     .nullable(),
 
@@ -195,19 +195,7 @@ export const listChecks = createServerFn({
 
     const { data, error } = await context.supabase
       .from("symptom_checks")
-      .select(
-        [
-          "id",
-          "symptoms",
-          "severity",
-          "urgency",
-          "top_condition",
-          "summary",
-          "subject_type",
-          "patient_id",
-          "created_at",
-        ].join(","),
-      )
+      .select("id,symptoms,severity,urgency,top_condition,summary,subject_type,patient_id,created_at")
       .eq("user_id", userId)
       .eq("subject_type", "self")
       .is("patient_id", null)
@@ -222,21 +210,7 @@ export const listChecks = createServerFn({
     }
 
     return (data ?? []).map(
-      (row: {
-        id: string;
-        symptoms: string;
-        severity: number | null;
-        urgency:
-          | "self-care"
-          | "see-a-doctor"
-          | "urgent"
-          | "emergency";
-        top_condition: string | null;
-        summary: string | null;
-        subject_type: string | null;
-        patient_id: string | null;
-        created_at: string;
-      }): HistoryCheck => ({
+      (row): HistoryCheck => ({
         id: row.id,
 
         date: row.created_at,
@@ -248,7 +222,7 @@ export const listChecks = createServerFn({
             ? row.severity
             : 0,
 
-        urgency: row.urgency,
+        urgency: UrgencySchema.parse(row.urgency),
 
         topCondition:
           row.top_condition ?? "",
@@ -295,19 +269,7 @@ export const listPatientChecks =
       const { data: checks, error } =
         await context.supabase
           .from("symptom_checks")
-          .select(
-            [
-              "id",
-              "symptoms",
-              "severity",
-              "urgency",
-              "top_condition",
-              "summary",
-              "subject_type",
-              "patient_id",
-              "created_at",
-            ].join(","),
-          )
+          .select("id,symptoms,severity,urgency,top_condition,summary,subject_type,patient_id,created_at")
           .eq("user_id", userId)
           .eq("subject_type", "patient")
           .eq("patient_id", data.patientId)
@@ -322,21 +284,7 @@ export const listPatientChecks =
       }
 
       return (checks ?? []).map(
-        (row: {
-          id: string;
-          symptoms: string;
-          severity: number | null;
-          urgency:
-            | "self-care"
-            | "see-a-doctor"
-            | "urgent"
-            | "emergency";
-          top_condition: string | null;
-          summary: string | null;
-          subject_type: string | null;
-          patient_id: string | null;
-          created_at: string;
-        }): HistoryCheck => ({
+        (row): HistoryCheck => ({
           id: row.id,
 
           date: row.created_at,
@@ -348,7 +296,7 @@ export const listPatientChecks =
               ? row.severity
               : 0,
 
-          urgency: row.urgency,
+          urgency: UrgencySchema.parse(row.urgency),
 
           topCondition:
             row.top_condition ?? "",
@@ -394,7 +342,7 @@ export const saveCheck = createServerFn({
         symptoms: data.symptoms,
 
         severity:
-          data.severity ?? null,
+          data.severity ?? 0,
 
         urgency: data.urgency,
 
@@ -477,7 +425,7 @@ export const saveCheck = createServerFn({
       symptoms: data.symptoms,
 
       severity:
-        data.severity ?? null,
+        data.severity ?? 0,
 
       urgency: data.urgency,
 
@@ -645,14 +593,7 @@ export const getProfile = createServerFn({
     const { data, error } =
       await context.supabase
         .from("profiles")
-        .select(
-          [
-            "id",
-            "name",
-            "age",
-            "sex",
-          ].join(","),
-        )
+        .select("id,name,age,sex")
         .eq("id", userId)
         .maybeSingle();
 

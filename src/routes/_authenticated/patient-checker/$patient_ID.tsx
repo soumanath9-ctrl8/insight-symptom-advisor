@@ -12,7 +12,7 @@ import {
   UserRound,
 } from "lucide-react";
 
-import { getPatient } from "@/lib/patient.functions";
+import { getPatient } from "@/lib/profile.functions";
 import {
   deleteCheck,
   listPatientChecks,
@@ -39,14 +39,14 @@ export const Route = createFileRoute(
   ssr: false,
 
   beforeLoad: async ({ params }) => {
-    if (!params.patientId) {
+    if (!params.patient_ID) {
       throw redirect({
         to: "/patients",
       });
     }
 
     return {
-      patientId: params.patientId,
+      patientId: params.patient_ID,
     };
   },
 
@@ -54,7 +54,7 @@ export const Route = createFileRoute(
 });
 
 function PatientHistoryPage() {
-  const { patientId } = Route.useParams();
+  const { patient_ID: patientId } = Route.useParams();
   const queryClient = useQueryClient();
 
   /*
@@ -130,8 +130,7 @@ function PatientHistoryPage() {
     sortedHistory.length > 0
       ? clampSeverity(
           Number(
-            sortedHistory[sortedHistory.length - 1]
-              .severity,
+            sortedHistory[sortedHistory.length - 1]?.severity ?? 0,
           ),
         )
       : 0;
@@ -140,8 +139,7 @@ function PatientHistoryPage() {
     sortedHistory.length > 1
       ? clampSeverity(
           Number(
-            sortedHistory[sortedHistory.length - 2]
-              .severity,
+            sortedHistory[sortedHistory.length - 2]?.severity ?? 0,
           ),
         )
       : null;
@@ -244,9 +242,9 @@ function PatientHistoryPage() {
         <div className="mx-auto max-w-4xl px-5 py-10 sm:py-16">
           <Button asChild variant="ghost" size="sm">
             <Link
-              to="/patient-checker/$patientId"
+              to="/patient-checker/$patient_ID"
               params={{
-                patientId,
+                patient_ID: patientId,
               }}
             >
               <ArrowLeft className="mr-2 size-4" />
@@ -297,9 +295,9 @@ function PatientHistoryPage() {
       <div className="mx-auto w-full max-w-4xl space-y-6 px-5 py-8 sm:py-12">
         <Button asChild variant="ghost" size="sm">
           <Link
-            to="/patient-checker/$patientId"
+            to="/patient-checker/$patient_ID"
             params={{
-              patientId,
+              patient_ID: patientId,
             }}
           >
             <ArrowLeft className="mr-2 size-4" />
@@ -366,9 +364,9 @@ function PatientHistoryPage() {
 
               <Button asChild className="mt-6">
                 <Link
-                  to="/patient-checker/$patientId"
+                  to="/patient-checker/$patient_ID"
                   params={{
-                    patientId,
+                    patient_ID: patientId,
                   }}
                 >
                   Start Patient Symptom Check
@@ -568,9 +566,9 @@ function PatientHistoryPage() {
             className="flex-1"
           >
             <Link
-              to="/patient-checker/$patientId"
+              to="/patient-checker/$patient_ID"
               params={{
-                patientId,
+                patient_ID: patientId,
               }}
             >
               Check {patient.name}'s Symptoms

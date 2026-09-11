@@ -27,9 +27,9 @@ export function topRisk(
 } {
   const condition =
     assessment.conditions.length > 0
-      ? [...assessment.conditions].sort(
+      ? ([...assessment.conditions].sort(
           (a, b) => b.likelihood - a.likelihood,
-        )[0]
+        )[0] ?? null)
       : null;
 
   const likelihood = Math.max(

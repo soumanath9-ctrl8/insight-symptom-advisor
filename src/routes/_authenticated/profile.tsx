@@ -1390,6 +1390,8 @@ function OwnHistoryGraph({
       points.length - 1
     ];
 
+  if (!latest) return null;
+
   const previous =
     points.length > 1
       ? points[
@@ -1528,10 +1530,10 @@ function OwnHistoryGraph({
                 {visiblePoints.length === 1 ? (
                   <SingleGraphPoint
                     value={
-                      visiblePoints[0].value
+                      visiblePoints[0]?.value ?? 0
                     }
                     label={formatShortDate(
-                      visiblePoints[0].date,
+                      visiblePoints[0]?.date ?? "",
                     )}
                   />
                 ) : (
