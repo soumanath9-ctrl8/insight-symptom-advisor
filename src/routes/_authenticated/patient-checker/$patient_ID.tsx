@@ -604,4 +604,705 @@ function PatientCheckerPage() {
               </div>
 
               <CardDescription>
-               
+                Question {step + 1} of{" "}
+                {questions.length}
+              </CardDescription>
+            </CardHeader>
+
+            <CardContent className="space-y-6">
+              <div>
+                <h2 className="text-xl font-semibold leading-relaxed">
+                  {currentQuestion.question}
+                </h2>
+
+                {currentQuestion.why && (
+                  <p className="mt-3 text-sm opacity-70">
+                    {currentQuestion.why}
+                  </p>
+                )}
+              </div>
+
+              {currentQuestion.options?.length ? (
+                <div className="grid gap-3">
+                  {currentQuestion.options.map(
+                    (option) => (
+                      <Button
+                        key={option}
+                        type="button"
+                        variant={
+                          answers[step] === option
+                            ? "default"
+                            : "outline"
+                        }
+                        className="min-h-12 justify-start whitespace-normal text-left"
+                        disabled={
+                          assessMutation.isPending
+                        }
+                        onClick={() =>
+                          answerCurrentQuestion(
+                            option,
+                          )
+                        }
+                      >
+                        {option}
+                      </Button>
+                    ),
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <Textarea
+                    value={draft}
+                    onChange={(event) =>
+                      setDraft(event.target.value)
+                    }
+                    placeholder="Type your answer..."
+                    rows={4}
+                    disabled={
+                      assessMutation.isPending
+                    }
+                  />
+
+                  <Button
+                    type="button"
+                    disabled={
+                      !draft.trim() ||
+                      assessMutation.isPending
+                    }
+                    onClick={() =>
+                      answerCurrentQuestion(
+                        draft.trim(),
+                      )
+                    }
+                  >
+                    Continue
+                  </Button>
+                </div>
+              )}
+
+              {assessMutation.isPending && (
+                <div
+                  className="flex items-center gap-2 text-sm opacity-70"
+                  aria-live="polite"
+                >
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Assessing...
+                </div>
+              )}
+
+              {assessMutation.error && (
+                <p className="text-sm text-destructive">
+                  {assessMutation.error instanceof Error
+                    ? assessMutation.error.message
+                    : "Unable to assess the symptoms."}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </main>
+    );
+  }
+
+  /**
+   * ---------------------------------------------------------
+   * INTAKE
+   * ---------------------------------------------------------
+   */
+  return (
+    <main className="min-h-screen px-4 py-6">
+      <div className="mx-auto max-w-3xl">
+        <header className="mb-6">
+          <Link
+            to="/patients"
+            className="inline-flex items-center text-sm opacity-70 hover:opacity-100"
+          >
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Patients
+          </Link>
+        </header>
+
+        <PatientHeader
+          name={patient.name}
+          age={patient.age}
+          sex={patient.sex}
+        />
+
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle>
+              Check symptoms for {patient.name}
+            </CardTitle>
+
+            <CardDescription>
+              This symptom check, assessment and history
+              are stored separately from your own
+              symptom history.
+            </CardDescription>
+          </CardHeader>
+
+          <CardContent className="space-y-6">
+            <div className="rounded-xl border p-4">
+              <div className="flex items-start gap-3">
+                <ShieldAlert
+                  className="mt-0.5 h-5 w-5 shrink-0"
+                  aria-hidden="true"
+                />
+
+                <div>
+                  <p className="font-medium">
+                    Patient-specific assessment
+                  </p>
+
+                  <p className="mt-1 text-sm opacity-70">
+                    The assessment uses this patient's
+                    profile information and this
+                    patient's previous checks only.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="patient-symptoms">
+                What symptoms does {patient.name} have?
+              </Label>
+
+              <Textarea
+                id="patient-symptoms"
+                value={symptoms}
+                onChange={(event) =>
+                  setSymptoms(event.target.value)
+                }
+                placeholder="Describe the symptoms..."
+                rows={6}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="patient-duration">
+                How long have the symptoms been present?
+              </Label>
+
+              <Input
+                id="patient-duration"
+                value={duration}
+                onChange={(event) =>
+                  setDuration(event.target.value)
+                }
+                placeholder="For example: 2 days"
+              />
+            </div>
+
+            <Button
+              className="w-full"
+              size="lg"
+              disabled={
+                !symptoms.trim() ||
+                questionsMutation.isPending
+              }
+              onClick={startCheck}
+            >
+              {questionsMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Preparing questions...
+                </>
+              ) : (
+                <>
+                  Check Symptoms
+                  <ChevronDown className="ml-2 h-4 w-4 rotate-[-90deg]" />
+                </>
+              )}
+            </Button>
+
+            {questionsMutation.error && (
+              <p className="text-sm text-destructive">
+                {questionsMutation.error instanceof Error
+                  ? questionsMutation.error.message
+                  : "Unable to start the symptom check."}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <PatientHistoryPreview
+          patientId={patientId}
+          history={historyQuery.data ?? []}
+          loading={historyQuery.isLoading}
+        />
+      </div>
+    </main>
+  );
+}
+
+/**
+ * ---------------------------------------------------------
+ * PATIENT HEADER
+ * ---------------------------------------------------------
+ */
+function PatientHeader({
+  name,
+  age,
+  sex,
+}: {
+  name: string;
+  age?: string | null;
+  sex?: string | null;
+}) {
+  return (
+    <div className="flex items-center gap-4">
+      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
+        <UserRound
+          className="h-7 w-7"
+          aria-hidden="true"
+        />
+      </div>
+
+      <div>
+        <p className="text-sm opacity-60">
+          Symptom check for
+        </p>
+
+        <h1 className="text-2xl font-bold">
+          {name}
+        </h1>
+
+        <p className="text-sm opacity-70">
+          {[age, sex].filter(Boolean).join(" · ")}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ---------------------------------------------------------
+ * PATIENT HISTORY PREVIEW
+ * ---------------------------------------------------------
+ */
+function PatientHistoryPreview({
+  patientId,
+  history,
+  loading,
+}: {
+  patientId: string;
+
+  history: Array<{
+    id: string;
+    date: string;
+    symptoms: string;
+    severity: number;
+    urgency: string;
+    topCondition: string;
+    summary: string;
+  }>;
+
+  loading: boolean;
+}) {
+  const latest = [...history]
+    .sort(
+      (a, b) =>
+        new Date(b.date).getTime() -
+        new Date(a.date).getTime(),
+    )
+    .slice(0, 3);
+
+  return (
+    <Card className="mt-6">
+      <CardHeader>
+        <CardTitle>
+          {history.length > 0
+            ? "This patient's symptom history"
+            : "Patient history"}
+        </CardTitle>
+
+        <CardDescription>
+          Only {history.length} check
+          {history.length === 1 ? "" : "s"} saved
+          for this patient.
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent>
+        {loading ? (
+          <div
+            className="flex items-center gap-2 py-6 text-sm opacity-70"
+            aria-live="polite"
+          >
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading patient history...
+          </div>
+        ) : history.length === 0 ? (
+          <div className="py-6 text-sm opacity-70">
+            No previous symptom checks for this patient.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {latest.map((item) => (
+              <div
+                key={item.id}
+                className="rounded-xl border p-4"
+              >
+                <div className="flex items-center gap-2 text-xs opacity-60">
+                  <Clock3 className="h-3.5 w-3.5" />
+
+                  {new Date(
+                    item.date,
+                  ).toLocaleDateString()}
+                </div>
+
+                <p className="mt-2 font-medium">
+                  {item.symptoms}
+                </p>
+
+                <p className="mt-1 text-sm opacity-70">
+                  Match strength: {item.severity}%
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <Button
+          asChild
+          variant="outline"
+          className="mt-5 w-full"
+        >
+          <Link
+            to="/patient-history/$patientId"
+            params={{
+              patientId,
+            }}
+          >
+            View Full Patient History
+          </Link>
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * ---------------------------------------------------------
+ * PATIENT RESULT
+ * ---------------------------------------------------------
+ */
+function PatientResult({
+  patient,
+  patientId,
+  assessment,
+  symptoms,
+  savedId,
+  saveError,
+  saving,
+  onSave,
+  onRestart,
+}: {
+  patient: {
+    id: string;
+    name: string;
+    age?: string | null;
+    sex?: string | null;
+  };
+
+  patientId: string;
+
+  assessment: Assessment;
+
+  symptoms: string;
+
+  savedId: string | null;
+
+  saveError: string | null;
+
+  saving: boolean;
+
+  onSave: () => void;
+
+  onRestart: () => void;
+}) {
+  const { likelihood, condition } =
+    topRisk(assessment);
+
+  /**
+   * Emergency and urgent are intentionally separate.
+   */
+  const isEmergency =
+    assessment.urgency === "emergency";
+
+  const isUrgent =
+    assessment.urgency === "urgent";
+
+  return (
+    <main className="min-h-screen px-4 py-6">
+      <div className="mx-auto max-w-3xl">
+        <Link
+          to="/patients"
+          className="inline-flex items-center text-sm opacity-70 hover:opacity-100"
+        >
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          Back to Patients
+        </Link>
+
+        <div className="mt-6">
+          <PatientHeader
+            name={patient.name}
+            age={patient.age}
+            sex={patient.sex}
+          />
+        </div>
+
+        <Card
+          className={`mt-6 ${
+            isEmergency
+              ? "border-destructive"
+              : ""
+          }`}
+        >
+          <CardHeader>
+            <CardTitle>
+              Assessment for {patient.name}
+            </CardTitle>
+
+            <CardDescription>
+              This result belongs only to this patient.
+            </CardDescription>
+          </CardHeader>
+
+          <CardContent className="space-y-6">
+            {(isEmergency || isUrgent) && (
+              <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-4">
+                <div className="flex gap-3">
+                  <ShieldAlert
+                    className="h-5 w-5 shrink-0"
+                    aria-hidden="true"
+                  />
+
+                  <div>
+                    <p className="font-semibold">
+                      {isEmergency
+                        ? "Emergency attention may be needed"
+                        : "Prompt medical attention may be needed"}
+                    </p>
+
+                    {assessment.urgencyReason && (
+                      <p className="mt-1 text-sm opacity-80">
+                        {assessment.urgencyReason}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div>
+              <p className="text-sm opacity-60">
+                Symptom match strength
+              </p>
+
+              <p className="mt-1 text-4xl font-bold">
+                {likelihood}%
+              </p>
+
+              <p className="mt-1 text-sm opacity-60">
+                This is a symptom-match indicator, not a
+                medically validated probability or
+                diagnosis.
+              </p>
+            </div>
+
+            <div>
+              <p className="text-sm opacity-60">
+                Reported symptoms
+              </p>
+
+              <p className="mt-2 leading-relaxed">
+                {symptoms}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-sm opacity-60">
+                Summary
+              </p>
+
+              <p className="mt-2 leading-relaxed">
+                {assessment.summary}
+              </p>
+            </div>
+
+            {condition && (
+              <div className="rounded-xl border p-4">
+                <p className="text-sm opacity-60">
+                  Possible match
+                </p>
+
+                <h2 className="mt-1 text-lg font-semibold">
+                  {condition.name}
+                </h2>
+
+                {condition.explanation && (
+                  <p className="mt-2 text-sm leading-relaxed opacity-80">
+                    {condition.explanation}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {assessment.nextStep && (
+              <div>
+                <p className="text-sm opacity-60">
+                  Recommended next step
+                </p>
+
+                <p className="mt-2 leading-relaxed">
+                  {assessment.nextStep}
+                </p>
+              </div>
+            )}
+
+            {assessment.generalAdvice.length > 0 && (
+              <div>
+                <p className="text-sm opacity-60">
+                  General advice
+                </p>
+
+                <ul className="mt-2 space-y-2">
+                  {assessment.generalAdvice.map(
+                    (advice) => (
+                      <li
+                        key={advice}
+                        className="rounded-lg border p-3 text-sm"
+                      >
+                        {advice}
+                      </li>
+                    ),
+                  )}
+                </ul>
+              </div>
+            )}
+
+            {assessment.redFlags.length > 0 && (
+              <div className="rounded-xl border border-destructive/40 p-4">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert
+                    className="h-5 w-5"
+                    aria-hidden="true"
+                  />
+
+                  <p className="font-semibold">
+                    Warning signs
+                  </p>
+                </div>
+
+                <ul className="mt-3 space-y-2 text-sm">
+                  {assessment.redFlags.map(
+                    (flag) => (
+                      <li key={flag}>
+                        • {flag}
+                      </li>
+                    ),
+                  )}
+                </ul>
+              </div>
+            )}
+
+            <div className="rounded-xl border p-4">
+              <p className="text-xs opacity-60">
+                Patient
+              </p>
+
+              <p className="mt-1 font-medium">
+                {patient.name}
+              </p>
+
+              <p className="text-sm opacity-70">
+                This assessment is stored separately from
+                your own symptom history.
+              </p>
+            </div>
+
+            {savedId ? (
+              <div className="flex items-center gap-2 rounded-xl border p-4">
+                <CheckCircle2
+                  className="h-5 w-5"
+                  aria-hidden="true"
+                />
+
+                <div>
+                  <p className="font-medium">
+                    Check saved
+                  </p>
+
+                  <p className="text-sm opacity-70">
+                    Saved to {patient.name}'s history.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <Button
+                className="w-full"
+                size="lg"
+                disabled={saving}
+                onClick={onSave}
+              >
+                {saving ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="mr-2 h-4 w-4" />
+                    Save to {patient.name}'s History
+                  </>
+                )}
+              </Button>
+            )}
+
+            {saveError && (
+              <p
+                className="text-sm text-destructive"
+                role="alert"
+              >
+                {saveError}
+              </p>
+            )}
+
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={onRestart}
+              >
+                Check Again
+              </Button>
+
+              <Button
+                variant="outline"
+                className="flex-1"
+                asChild
+              >
+                <Link
+                  to="/patient-history/$patientId"
+                  params={{
+                    patientId,
+                  }}
+                >
+                  View History
+                </Link>
+              </Button>
+            </div>
+
+            <p className="text-center text-xs leading-relaxed opacity-60">
+              SymptomScope provides informational
+              symptom assessment and does not replace a
+              qualified healthcare professional.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    </main>
+  );
+}
