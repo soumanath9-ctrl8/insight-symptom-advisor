@@ -144,6 +144,14 @@ const AssessmentSchema = z.object({
   nextStep: z.string().default(""),
 });
 
+const ClarificationSchema = z.object({
+  clarification: z.object({
+    question: z.string(),
+    why: z.string().optional().default(""),
+    options: z.array(z.string()).optional().default([]),
+  }).nullable(),
+});
+
 type RawAssessment = z.infer<typeof AssessmentSchema>;
 
 export type RiskLevel = "low" | "moderate" | "high";
@@ -173,6 +181,7 @@ export type Assessment = Omit<
   urgency: Urgency;
   confidence: Confidence;
   conditions: Condition[];
+  selfCare: string[];
 };
 
 /* -------------------------------------------------------------------------- */
@@ -390,6 +399,8 @@ export function immediateEmergencyAssessment(
       lang === "bn"
         ? "এখনই ১১২ বা ১০৮-এ কল করুন অথবা নিকটতম আপৎকালীন বিভাগে যান।"
         : "Call 112 or 108 now, or go to the nearest emergency department.",
+
+    selfCare: [],
   };
 }
 
@@ -1046,6 +1057,10 @@ function normalizeAssessment(
       .filter(Boolean)
       .slice(0, 10),
     nextStep: parsed.nextStep.trim(),
+    selfCare: conditions
+      .flatMap((condition) => condition.selfCare)
+      .filter((item, index, items) => items.indexOf(item) === index)
+      .slice(0, 8),
   };
 }
 
@@ -1292,62 +1307,22 @@ export const clarifyAnswers = createServerFn({
     const safety = safetyScreen(data);
 
     if (safety.level === "critical") {
-      return immediateEmergencyAssessment(
-        data,
-      ) as Assessment;
+      return null;
     }
 
-    const worsening = isWorsening(
-      data.symptoms,
-      data.answers,
-    );
-
-    const system = assessmentSystemPrompt({
-      language: data.language,
-      redFlagCheck: safety,
-      worseningOverride: worsening,
-      ...(data.age !== undefined ? { age: data.age } : {}),
-      ...(data.sex !== undefined ? { sex: data.sex } : {}),
-    });
-
     const raw = await callModel(
-      system,
       [
-        "Perform the assessment again using the additional follow-up answers below.",
-        "Do not treat the follow-up questions themselves as patient symptoms.",
-        "",
+        "Review the reported symptoms and answers for one material contradiction or essential missing detail.",
+        "Ask at most one concise clarification only if it could change urgency or the differential.",
+        "Do not repeat answered questions or infer missing facts. Return null when no clarification is essential.",
+        langLine(data.language),
+        'Reply with ONLY JSON: {"clarification": null | {"question": string, "why": string, "options": string[]}}',
+      ].join(" "),
+      [
         assessmentContext(data),
       ].join("\n"),
     );
-
-    let assessment =
-      normalizeAssessment(
-        raw,
-        data.language,
-      );
-
-    assessment =
-      applySafetyOverride(
-        assessment,
-        safety,
-        data.language,
-      );
-
-    if (
-      safety.level === "urgent" &&
-      assessment.urgency === "self-care"
-    ) {
-      assessment = {
-        ...assessment,
-        urgency: "urgent",
-        urgencyReason:
-          data.language === "bn"
-            ? "নিরাপত্তা যাচাইয়ে দ্রুত চিকিৎসা মূল্যায়নের প্রয়োজন হতে পারে এমন একটি সতর্কতা পাওয়া গেছে।"
-            : "The safety check found a finding that may require prompt medical assessment.",
-      };
-    }
-
-    return assessment;
+    return ClarificationSchema.parse(raw).clarification;
   });
 
 /* -------------------------------------------------------------------------- */
