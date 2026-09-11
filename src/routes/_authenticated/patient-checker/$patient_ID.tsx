@@ -33,37 +33,74 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 
+/*
+ * =========================================================
+ * ROUTE
+ * =========================================================
+ *
+ * IMPORTANT:
+ *
+ * This file is the PATIENT HISTORY page.
+ *
+ * Therefore its route MUST be:
+ *
+ * /patient-history/$patientId
+ *
+ * The actual Patient Symptom Checker is a separate route:
+ *
+ * /patient-checker/$patientId
+ *
+ * Do not mix these two routes.
+ */
+
 export const Route = createFileRoute(
-  "/_authenticated/patient-checker/$patient_ID",
+  "/_authenticated/patient-history/$patientId",
 )({
   ssr: false,
 
   beforeLoad: async ({ params }) => {
-    if (!params.patient_ID) {
+    /*
+     * A valid patient ID is required.
+     *
+     * If somebody opens the route without a patient ID,
+     * send them back to the patient list.
+     */
+    if (!params.patientId) {
       throw redirect({
         to: "/patients",
       });
     }
 
     return {
-      patientId: params.patient_ID,
+      patientId: params.patientId,
     };
   },
 
   component: PatientHistoryPage,
 });
 
+/*
+ * =========================================================
+ * MAIN PAGE
+ * =========================================================
+ */
+
 function PatientHistoryPage() {
-  const { patient_ID: patientId } = Route.useParams();
+  const { patientId } = Route.useParams();
+
   const queryClient = useQueryClient();
 
   /*
-   * ---------------------------------------------------------
+   * =======================================================
    * PATIENT PROFILE
-   * ---------------------------------------------------------
+   * =======================================================
    *
    * Only the selected patient is loaded.
+   *
+   * This does NOT load the logged-in user's own profile
+   * history.
    */
+
   const patientQuery = useQuery({
     queryKey: ["patient", patientId],
 
@@ -76,17 +113,20 @@ function PatientHistoryPage() {
   });
 
   /*
-   * ---------------------------------------------------------
+   * =======================================================
    * PATIENT-ONLY HISTORY
-   * ---------------------------------------------------------
+   * =======================================================
    *
    * IMPORTANT:
    *
-   * This does NOT use listChecks().
+   * We intentionally use listPatientChecks().
    *
-   * Therefore the logged-in user's own ["checks"] history
-   * can never be mixed into this graph.
+   * We DO NOT use listChecks().
+   *
+   * Therefore this page only shows history belonging to
+   * this selected patient.
    */
+
   const historyQuery = useQuery({
     queryKey: ["patient-checks", patientId],
 
@@ -97,6 +137,17 @@ function PatientHistoryPage() {
         },
       }),
   });
+
+  /*
+   * =======================================================
+   * DELETE HISTORY ENTRY
+   * =======================================================
+   *
+   * The backend deleteCheck() performs the ownership check.
+   *
+   * After successful deletion, only this patient's history
+   * query is invalidated.
+   */
 
   const removeMutation = useMutation({
     mutationFn: (id: string) =>
@@ -113,10 +164,27 @@ function PatientHistoryPage() {
     },
   });
 
+  /*
+   * =======================================================
+   * DATA
+   * =======================================================
+   */
+
   const patient = patientQuery.data;
 
-  const history: HistoryEntry[] =
-    historyQuery.data ?? [];
+  const history: HistoryEntry[] = historyQuery.data ?? [];
+
+  /*
+   * Sort oldest -> newest.
+   *
+   * This makes:
+   *
+   * - trend calculation
+   * - graph
+   * - previous/latest comparison
+   *
+   * deterministic.
+   */
 
   const sortedHistory = useMemo(() => {
     return [...history].sort(
@@ -125,6 +193,12 @@ function PatientHistoryPage() {
         new Date(b.date).getTime(),
     );
   }, [history]);
+
+  /*
+   * =======================================================
+   * LATEST SEVERITY
+   * =======================================================
+   */
 
   const latestSeverity =
     sortedHistory.length > 0
@@ -135,6 +209,12 @@ function PatientHistoryPage() {
         )
       : 0;
 
+  /*
+   * =======================================================
+   * PREVIOUS SEVERITY
+   * =======================================================
+   */
+
   const previousSeverity =
     sortedHistory.length > 1
       ? clampSeverity(
@@ -144,6 +224,12 @@ function PatientHistoryPage() {
         )
       : null;
 
+  /*
+   * =======================================================
+   * TREND
+   * =======================================================
+   */
+
   const trend =
     previousSeverity === null
       ? "stable"
@@ -152,6 +238,12 @@ function PatientHistoryPage() {
         : latestSeverity < previousSeverity
           ? "down"
           : "stable";
+
+  /*
+   * =======================================================
+   * AVERAGE
+   * =======================================================
+   */
 
   const averageSeverity =
     sortedHistory.length > 0
@@ -164,10 +256,11 @@ function PatientHistoryPage() {
       : 0;
 
   /*
-   * ---------------------------------------------------------
-   * LOADING
-   * ---------------------------------------------------------
+   * =======================================================
+   * LOADING PATIENT
+   * =======================================================
    */
+
   if (patientQuery.isLoading) {
     return (
       <main className="min-h-screen bg-background">
@@ -179,6 +272,7 @@ function PatientHistoryPage() {
             aria-live="polite"
           >
             <Loader2 className="size-5 animate-spin" />
+
             Loading patient history…
           </div>
         </div>
@@ -187,10 +281,11 @@ function PatientHistoryPage() {
   }
 
   /*
-   * ---------------------------------------------------------
+   * =======================================================
    * PATIENT NOT FOUND / ACCESS ERROR
-   * ---------------------------------------------------------
+   * =======================================================
    */
+
   if (patientQuery.error || !patient) {
     return (
       <main className="min-h-screen bg-background">
@@ -200,6 +295,7 @@ function PatientHistoryPage() {
           <Button asChild variant="ghost" size="sm">
             <Link to="/patients">
               <ArrowLeft className="mr-2 size-4" />
+
               Back to Patients
             </Link>
           </Button>
@@ -230,10 +326,11 @@ function PatientHistoryPage() {
   }
 
   /*
-   * ---------------------------------------------------------
-   * ERROR LOADING HISTORY
-   * ---------------------------------------------------------
+   * =======================================================
+   * HISTORY ERROR
+   * =======================================================
    */
+
   if (historyQuery.isError) {
     return (
       <main className="min-h-screen bg-background">
@@ -242,12 +339,13 @@ function PatientHistoryPage() {
         <div className="mx-auto max-w-4xl px-5 py-10 sm:py-16">
           <Button asChild variant="ghost" size="sm">
             <Link
-              to="/patient-checker/$patient_ID"
+              to="/patient-checker/$patientId"
               params={{
-                patient_ID: patientId,
+                patientId,
               }}
             >
               <ArrowLeft className="mr-2 size-4" />
+
               Back to Patient Check
             </Link>
           </Button>
@@ -270,9 +368,7 @@ function PatientHistoryPage() {
               <Button
                 className="mt-5"
                 variant="outline"
-                onClick={() =>
-                  historyQuery.refetch()
-                }
+                onClick={() => historyQuery.refetch()}
               >
                 Try Again
               </Button>
@@ -284,30 +380,38 @@ function PatientHistoryPage() {
   }
 
   /*
-   * ---------------------------------------------------------
+   * =======================================================
    * MAIN PAGE
-   * ---------------------------------------------------------
+   * =======================================================
    */
+
   return (
     <main className="min-h-screen bg-background">
       <ProfileMenu />
 
       <div className="mx-auto w-full max-w-4xl space-y-6 px-5 py-8 sm:py-12">
+
+        {/* =================================================
+            BACK TO PATIENT CHECKER
+        ================================================== */}
+
         <Button asChild variant="ghost" size="sm">
           <Link
-            to="/patient-checker/$patient_ID"
+            to="/patient-checker/$patientId"
             params={{
-              patient_ID: patientId,
+              patientId,
             }}
           >
             <ArrowLeft className="mr-2 size-4" />
+
             Back to Patient Check
           </Link>
         </Button>
 
-        {/* -------------------------------------------------
+        {/* =================================================
             PATIENT HEADER
-        -------------------------------------------------- */}
+        ================================================== */}
+
         <section className="flex items-center gap-4">
           <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
             <UserRound className="size-6" />
@@ -330,12 +434,14 @@ function PatientHistoryPage() {
           </div>
         </section>
 
-        {/* -------------------------------------------------
+        {/* =================================================
             SEPARATION NOTICE
-        -------------------------------------------------- */}
+        ================================================== */}
+
         <div className="rounded-xl border bg-muted/40 px-4 py-3">
           <p className="text-sm leading-6 text-muted-foreground">
-            This is <span className="font-medium text-foreground">
+            This is{" "}
+            <span className="font-medium text-foreground">
               {patient.name}
             </span>
             's separate symptom history. It does not
@@ -343,12 +449,14 @@ function PatientHistoryPage() {
           </p>
         </div>
 
-        {/* -------------------------------------------------
-            EMPTY STATE
-        -------------------------------------------------- */}
+        {/* =================================================
+            EMPTY HISTORY
+        ================================================== */}
+
         {history.length === 0 ? (
           <Card>
             <CardContent className="flex min-h-72 flex-col items-center justify-center px-6 text-center">
+
               <div className="flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary">
                 <BarChart3 className="size-7" />
               </div>
@@ -362,11 +470,20 @@ function PatientHistoryPage() {
                 for {patient.name} yet.
               </p>
 
+              {/* =================================================
+                  IMPORTANT FIX
+                  
+                  This button goes to the SEPARATE PATIENT
+                  SYMPTOM CHECKER route.
+                  
+                  It does NOT link back to this history page.
+              ================================================== */}
+
               <Button asChild className="mt-6">
                 <Link
-                  to="/patient-checker/$patient_ID"
+                  to="/patient-checker/$patientId"
                   params={{
-                    patient_ID: patientId,
+                    patientId,
                   }}
                 >
                   Start Patient Symptom Check
@@ -376,9 +493,10 @@ function PatientHistoryPage() {
           </Card>
         ) : (
           <>
-            {/* -------------------------------------------------
+            {/* =================================================
                 SUMMARY CARDS
-            -------------------------------------------------- */}
+            ================================================== */}
+
             <section
               aria-label="Patient symptom history summary"
               className="grid gap-4 sm:grid-cols-3"
@@ -422,15 +540,18 @@ function PatientHistoryPage() {
               />
             </section>
 
-            {/* -------------------------------------------------
+            {/* =================================================
                 GRAPH
-            -------------------------------------------------- */}
+            ================================================== */}
+
             <Card className="overflow-hidden">
               <CardHeader className="pb-2">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+
                   <div>
                     <CardTitle className="flex items-center gap-2">
                       <BarChart3 className="size-5" />
+
                       Symptom Severity Trend
                     </CardTitle>
 
@@ -451,6 +572,7 @@ function PatientHistoryPage() {
               </CardHeader>
 
               <CardContent className="pt-5">
+
                 <SeverityGraph
                   entries={sortedHistory}
                 />
@@ -476,9 +598,10 @@ function PatientHistoryPage() {
               </CardContent>
             </Card>
 
-            {/* -------------------------------------------------
-                OVERVIEW
-            -------------------------------------------------- */}
+            {/* =================================================
+                HISTORY OVERVIEW
+            ================================================== */}
+
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg">
@@ -511,9 +634,10 @@ function PatientHistoryPage() {
               </CardContent>
             </Card>
 
-            {/* -------------------------------------------------
+            {/* =================================================
                 FULL TIMELINE
-            -------------------------------------------------- */}
+            ================================================== */}
+
             <section>
               <div className="mb-4">
                 <h2 className="text-xl font-semibold">
@@ -539,6 +663,7 @@ function PatientHistoryPage() {
                   aria-live="polite"
                 >
                   <Loader2 className="size-3.5 animate-spin" />
+
                   Removing history entry…
                 </div>
               )}
@@ -556,24 +681,36 @@ function PatientHistoryPage() {
           </>
         )}
 
-        {/* -------------------------------------------------
+        {/* =================================================
             FOOTER ACTIONS
-        -------------------------------------------------- */}
+        ================================================== */}
+
         <div className="flex flex-col gap-3 sm:flex-row">
+
+          {/* =================================================
+              IMPORTANT FIX
+              
+              This is the actual Patient Symptom Checker.
+          ================================================== */}
+
           <Button
             asChild
             variant="outline"
             className="flex-1"
           >
             <Link
-              to="/patient-checker/$patient_ID"
+              to="/patient-checker/$patientId"
               params={{
-                patient_ID: patientId,
+                patientId,
               }}
             >
               Check {patient.name}'s Symptoms
             </Link>
           </Button>
+
+          {/* =================================================
+              ALL PATIENT PROFILES
+          ================================================== */}
 
           <Button
             asChild
@@ -590,11 +727,12 @@ function PatientHistoryPage() {
   );
 }
 
-/**
- * ---------------------------------------------------------
+/*
+ * =========================================================
  * SUMMARY CARD
- * ---------------------------------------------------------
+ * =========================================================
  */
+
 function SummaryCard({
   icon,
   label,
@@ -607,16 +745,17 @@ function SummaryCard({
   return (
     <Card>
       <CardContent className="flex items-center gap-4 p-5">
-        <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
+
+        <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
           {icon}
         </div>
 
         <div className="min-w-0">
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             {label}
           </p>
 
-          <p className="mt-1 text-lg font-semibold">
+          <p className="mt-1 truncate text-xl font-semibold">
             {value}
           </p>
         </div>
@@ -625,11 +764,12 @@ function SummaryCard({
   );
 }
 
-/**
- * ---------------------------------------------------------
+/*
+ * =========================================================
  * HISTORY SUMMARY ROW
- * ---------------------------------------------------------
+ * =========================================================
  */
+
 function HistorySummaryRow({
   entry,
 }: {
@@ -639,86 +779,130 @@ function HistorySummaryRow({
     Number(entry.severity),
   );
 
+  const dateLabel = formatHistoryDate(entry.date);
+
   return (
-    <div className="flex items-center justify-between gap-4 rounded-lg border bg-background px-4 py-3">
+    <div className="flex flex-col gap-3 rounded-xl border bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
+
       <div className="min-w-0">
-        <p className="truncate text-sm font-medium">
+
+        <div className="flex items-center gap-2">
+          <CalendarDays className="size-4 shrink-0 text-muted-foreground" />
+
+          <span className="text-sm font-medium">
+            {dateLabel}
+          </span>
+        </div>
+
+        <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">
           {entry.symptoms || "Symptom check"}
         </p>
 
-        <p className="mt-1 text-xs text-muted-foreground">
-          {formatDate(entry.date)}
-        </p>
+        {entry.topCondition && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            Main possible condition:{" "}
+            <span className="font-medium text-foreground">
+              {entry.topCondition}
+            </span>
+          </p>
+        )}
       </div>
 
-      <Badge variant="outline" className="shrink-0">
-        {formatSeverity(severity)}/10
-      </Badge>
+      <div className="flex shrink-0 items-center gap-3 sm:flex-col sm:items-end">
+        <Badge variant="secondary">
+          {formatSeverity(severity)}/10
+        </Badge>
+
+        {entry.urgency && (
+          <span className="text-xs text-muted-foreground">
+            {formatUrgency(entry.urgency)}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
 
-/**
- * ---------------------------------------------------------
+/*
+ * =========================================================
  * SEVERITY GRAPH
- * ---------------------------------------------------------
+ * =========================================================
+ *
+ * This is a lightweight SVG graph so we do not need another
+ * chart dependency.
  */
+
 function SeverityGraph({
   entries,
 }: {
   entries: HistoryEntry[];
 }) {
-  const width = 760;
-  const height = 280;
+  /*
+   * Show at most the latest 10 entries.
+   *
+   * We keep them in chronological order.
+   */
 
-  const padding = {
-    top: 22,
-    right: 24,
-    bottom: 48,
-    left: 44,
-  };
+  const points = entries.slice(-10);
+
+  if (points.length === 0) {
+    return (
+      <div className="flex min-h-56 items-center justify-center rounded-xl border border-dashed bg-muted/20">
+        <p className="text-sm text-muted-foreground">
+          No graph data available.
+        </p>
+      </div>
+    );
+  }
+
+  const width = 760;
+  const height = 300;
+
+  const paddingLeft = 48;
+  const paddingRight = 24;
+  const paddingTop = 24;
+  const paddingBottom = 44;
 
   const chartWidth =
-    width - padding.left - padding.right;
+    width - paddingLeft - paddingRight;
 
   const chartHeight =
-    height - padding.top - padding.bottom;
+    height - paddingTop - paddingBottom;
 
-  const points = entries.map((entry, index) => {
-    const severity = clampSeverity(
-      Number(entry.severity),
+  const getX = (index: number) => {
+    if (points.length === 1) {
+      return paddingLeft + chartWidth / 2;
+    }
+
+    return (
+      paddingLeft +
+      (index / (points.length - 1)) * chartWidth
     );
+  };
 
-    const x =
-      entries.length === 1
-        ? padding.left + chartWidth / 2
-        : padding.left +
-          (index / (entries.length - 1)) *
-            chartWidth;
+  const getY = (severity: number) => {
+    const value = clampSeverity(severity);
 
-    const y =
-      padding.top +
-      chartHeight -
-      (severity / 10) * chartHeight;
+    return (
+      paddingTop +
+      (1 - value / 10) * chartHeight
+    );
+  };
 
-    return {
-      x,
-      y,
-      severity,
-      entry,
-    };
-  });
+  const coordinates = points.map((entry, index) => ({
+    x: getX(index),
+    y: getY(Number(entry.severity)),
+    value: clampSeverity(Number(entry.severity)),
+    entry,
+  }));
 
-  const path =
-    points.length > 1
-      ? points
-          .map((point, index) =>
-            index === 0
-              ? `M ${point.x} ${point.y}`
-              : `L ${point.x} ${point.y}`,
-          )
-          .join(" ")
-      : "";
+  const path = coordinates
+    .map((point, index) =>
+      index === 0
+        ? `M ${point.x} ${point.y}`
+        : `L ${point.x} ${point.y}`,
+    )
+    .join(" ");
 
   const gridValues = [0, 2, 4, 6, 8, 10];
 
@@ -727,21 +911,22 @@ function SeverityGraph({
       <div className="min-w-[620px]">
         <svg
           viewBox={`0 0 ${width} ${height}`}
-          className="h-auto w-full overflow-visible"
+          className="h-auto w-full"
           role="img"
-          aria-label={`${entries.length} saved symptom checks shown on a symptom severity trend graph`}
+          aria-label="Patient symptom severity trend graph"
         >
+          {/* =================================================
+              GRID
+          ================================================== */}
+
           {gridValues.map((value) => {
-            const y =
-              padding.top +
-              chartHeight -
-              (value / 10) * chartHeight;
+            const y = getY(value);
 
             return (
               <g key={value}>
                 <line
-                  x1={padding.left}
-                  x2={width - padding.right}
+                  x1={paddingLeft}
+                  x2={width - paddingRight}
                   y1={y}
                   y2={y}
                   stroke="currentColor"
@@ -750,7 +935,7 @@ function SeverityGraph({
                 />
 
                 <text
-                  x={padding.left - 10}
+                  x={paddingLeft - 10}
                   y={y + 4}
                   textAnchor="end"
                   className="fill-muted-foreground text-[11px]"
@@ -761,25 +946,33 @@ function SeverityGraph({
             );
           })}
 
+          {/* =================================================
+              AXIS
+          ================================================== */}
+
           <line
-            x1={padding.left}
-            x2={padding.left}
-            y1={padding.top}
-            y2={padding.top + chartHeight}
+            x1={paddingLeft}
+            x2={paddingLeft}
+            y1={paddingTop}
+            y2={height - paddingBottom}
             stroke="currentColor"
-            strokeOpacity="0.18"
+            strokeOpacity="0.2"
           />
 
           <line
-            x1={padding.left}
-            x2={width - padding.right}
-            y1={padding.top + chartHeight}
-            y2={padding.top + chartHeight}
+            x1={paddingLeft}
+            x2={width - paddingRight}
+            y1={height - paddingBottom}
+            y2={height - paddingBottom}
             stroke="currentColor"
-            strokeOpacity="0.18"
+            strokeOpacity="0.2"
           />
 
-          {path && (
+          {/* =================================================
+              TREND LINE
+          ================================================== */}
+
+          {coordinates.length > 1 && (
             <path
               d={path}
               fill="none"
@@ -791,87 +984,135 @@ function SeverityGraph({
             />
           )}
 
-          {points.map((point) => (
+          {/* =================================================
+              DATA POINTS
+          ================================================== */}
+
+          {coordinates.map((point, index) => (
             <g key={point.entry.id}>
+
               <circle
                 cx={point.x}
                 cy={point.y}
                 r="6"
-                className="fill-background stroke-primary"
-                strokeWidth="3"
+                className="fill-primary"
               />
+
+              <circle
+                cx={point.x}
+                cy={point.y}
+                r="10"
+                fill="none"
+                stroke="currentColor"
+                strokeOpacity="0.12"
+              />
+
+              {/* Value */}
 
               <text
                 x={point.x}
-                y={point.y - 13}
+                y={point.y - 14}
                 textAnchor="middle"
                 className="fill-foreground text-[11px] font-medium"
               >
-                {formatSeverity(point.severity)}
+                {point.value}
               </text>
+
+              {/* Date */}
 
               <text
                 x={point.x}
-                y={height - 20}
+                y={height - paddingBottom + 22}
                 textAnchor="middle"
                 className="fill-muted-foreground text-[10px]"
               >
-                {formatGraphDate(
+                {formatShortDate(
                   point.entry.date,
                 )}
               </text>
             </g>
           ))}
+
+          {/* =================================================
+              Y-AXIS LABEL
+          ================================================== */}
+
+          <text
+            x="14"
+            y={height / 2}
+            transform={`rotate(-90 14 ${height / 2})`}
+            textAnchor="middle"
+            className="fill-muted-foreground text-[10px]"
+          >
+            Severity
+          </text>
         </svg>
       </div>
     </div>
   );
 }
 
-/**
- * ---------------------------------------------------------
+/*
+ * =========================================================
  * HELPERS
- * ---------------------------------------------------------
+ * =========================================================
  */
+
 function clampSeverity(value: number) {
   if (!Number.isFinite(value)) {
     return 0;
   }
 
-  return Math.max(0, Math.min(10, value));
+  return Math.min(10, Math.max(0, value));
 }
 
 function formatSeverity(value: number) {
-  const safe = clampSeverity(value);
-
-  return Number.isInteger(safe)
-    ? String(safe)
-    : safe.toFixed(1);
+  return clampSeverity(value).toFixed(1);
 }
 
-function formatDate(date: string) {
-  const parsed = new Date(date);
+function formatHistoryDate(value: string) {
+  const date = new Date(value);
 
-  if (Number.isNaN(parsed.getTime())) {
-    return date;
+  if (Number.isNaN(date.getTime())) {
+    return value;
   }
 
-  return parsed.toLocaleDateString(undefined, {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
 }
 
-function formatGraphDate(date: string) {
-  const parsed = new Date(date);
+function formatShortDate(value: string) {
+  const date = new Date(value);
 
-  if (Number.isNaN(parsed.getTime())) {
+  if (Number.isNaN(date.getTime())) {
     return "";
   }
 
-  return parsed.toLocaleDateString(undefined, {
-    day: "numeric",
+  return new Intl.DateTimeFormat(undefined, {
     month: "short",
-  });
+    day: "numeric",
+  }).format(date);
+}
+
+function formatUrgency(
+  urgency: HistoryEntry["urgency"],
+) {
+  switch (urgency) {
+    case "emergency":
+      return "Emergency";
+
+    case "urgent":
+      return "Urgent";
+
+    case "see-a-doctor":
+      return "See a doctor";
+
+    case "self-care":
+      return "Self-care";
+
+    default:
+      return urgency;
+  }
 }
