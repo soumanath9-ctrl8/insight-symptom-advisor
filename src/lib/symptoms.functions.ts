@@ -15,15 +15,75 @@ import { validateAssessment } from "./safety-validator";
 import { describeVitals, extractVitals, flagVitals, type Vitals } from "./vitals";
 
 
+const PatientProfileContextSchema = z
+  .object({
+    name: z.string().max(200).optional(),
+    age: z.string().max(10).optional(),
+    sex: z.string().max(20).optional(),
+
+    allergies: z.string().max(2000).optional(),
+
+    existingConditions: z
+      .string()
+      .max(2000)
+      .optional(),
+
+    currentMedications: z
+      .string()
+      .max(2000)
+      .optional(),
+
+    previousMajorIllnesses: z
+      .string()
+      .max(2000)
+      .optional(),
+
+    smokingStatus: z
+      .string()
+      .max(50)
+      .optional(),
+
+    familyHistory: z
+      .string()
+      .max(2000)
+      .optional(),
+
+    pregnancyStatus: z
+      .string()
+      .max(100)
+      .optional(),
+  })
+  .optional();
 
 const ContextInput = z.object({
   symptoms: z.string().min(3).max(2000),
+
   age: z.string().max(10).optional(),
+
   sex: z.string().max(20).optional(),
+
   duration: z.string().max(60).optional(),
-  severity: z.number().min(1).max(10).optional(),
-  language: z.enum(["en", "bn"]).default("en"),
+
+  severity: z
+    .number()
+    .min(1)
+    .max(10)
+    .optional(),
+
+  language: z
+    .enum(["en", "bn"])
+    .default("en"),
+
+  /**
+   * Optional.
+   *
+   * Used only when checking symptoms for
+   * another saved patient.
+   */
+  patientProfile:
+    PatientProfileContextSchema,
 });
+
 
 const AnswerSchema = z.object({ question: z.string(), answer: z.string() });
 
@@ -440,12 +500,4 @@ export const clarifyAnswers = createServerFn({ method: "POST" })
     return { question: parsed.question, why: parsed.why, options: parsed.options };
   });
 
-const ContextInput = z.object({
-  symptoms: z.string().min(3).max(2000),
-  age: z.string().max(10).optional(),
-  sex: z.string().max(20).optional(),
-  duration: z.string().max(60).optional(),
-  severity: z.number().min(1).max(10).optional(),
-  language: z.enum(["en", "bn"]).default("en"),
-});
 
