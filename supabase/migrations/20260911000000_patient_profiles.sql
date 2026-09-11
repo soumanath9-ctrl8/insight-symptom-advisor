@@ -210,3 +210,41 @@ EXECUTE FUNCTION public.set_patient_profile_updated_at();
 REVOKE EXECUTE
 ON FUNCTION public.set_patient_profile_updated_at()
 FROM PUBLIC, anon, authenticated;
+
+-- ============================================================
+-- 9. Prevent reassignment of symptom history
+-- ============================================================
+--
+-- A saved symptom check must remain attached to the same subject.
+-- This prevents an authenticated user from moving an existing
+-- self/patient history record to another subject/patient.
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION public.prevent_symptom_check_subject_change()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NEW.subject_type IS DISTINCT FROM OLD.subject_type
+     OR NEW.patient_id IS DISTINCT FROM OLD.patient_id THEN
+    RAISE EXCEPTION
+      'The subject of a saved symptom check cannot be changed.';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS prevent_symptom_check_subject_change
+ON public.symptom_checks;
+
+CREATE TRIGGER prevent_symptom_check_subject_change
+BEFORE UPDATE ON public.symptom_checks
+FOR EACH ROW
+EXECUTE FUNCTION public.prevent_symptom_check_subject_change();
+
+REVOKE EXECUTE
+ON FUNCTION public.prevent_symptom_check_subject_change()
+FROM PUBLIC, anon, authenticated;
