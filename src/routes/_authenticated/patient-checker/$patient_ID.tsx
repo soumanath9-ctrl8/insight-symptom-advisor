@@ -1,37 +1,26 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
+  Activity,
   ArrowLeft,
-  CheckCircle2,
-  ChevronDown,
-  Clock3,
+  BarChart3,
+  CalendarDays,
   Loader2,
-  MessageCircleQuestion,
-  Save,
-  ShieldAlert,
+  TrendingDown,
+  TrendingUp,
   UserRound,
 } from "lucide-react";
 
-import {
-  assessPatientSymptoms,
-  clarifyPatientAnswers,
-  getPatientFollowUpQuestions,
-  immediateEmergencyAssessment,
-  type Assessment,
-  type FollowUpQuestion,
-} from "@/lib/symptoms.functions";
-
 import { getPatient } from "@/lib/patient.functions";
-
 import {
+  deleteCheck,
   listPatientChecks,
-  saveCheck,
 } from "@/lib/history.functions";
+import type { HistoryEntry } from "@/lib/history";
 
-import { topRisk } from "@/lib/history";
-import { extractVitals } from "@/lib/vitals";
-import { useLang } from "@/lib/i18n";
+import { ProfileMenu } from "@/components/ProfileMenu";
+import { SymptomTimeline } from "@/components/SymptomTimeline";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -41,13 +30,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-
-import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 
 export const Route = createFileRoute(
-  "/_authenticated/patient-checker/$patientId",
+  "/_authenticated/patient-history/$patientId",
 )({
   ssr: false,
 
@@ -63,49 +50,19 @@ export const Route = createFileRoute(
     };
   },
 
-  component: PatientCheckerPage,
+  component: PatientHistoryPage,
 });
 
-type Stage = "intake" | "questions" | "result";
-
-type AnswerPair = {
-  question: string;
-  answer: string;
-};
-
-function PatientCheckerPage() {
+function PatientHistoryPage() {
   const { patientId } = Route.useParams();
-  const { lang } = useLang();
   const queryClient = useQueryClient();
 
-  const [stage, setStage] = useState<Stage>("intake");
-
-  const [symptoms, setSymptoms] = useState("");
-  const [duration, setDuration] = useState("");
-
-  const [questions, setQuestions] = useState<FollowUpQuestion[]>([]);
-  const [answers, setAnswers] = useState<string[]>([]);
-  const [step, setStep] = useState(0);
-
-  const [draft, setDraft] = useState("");
-
-  const [assessment, setAssessment] =
-    useState<Assessment | null>(null);
-
-  const [savedId, setSavedId] =
-    useState<string | null>(null);
-
-  const [saveError, setSaveError] =
-    useState<string | null>(null);
-
-  /**
+  /*
    * ---------------------------------------------------------
    * PATIENT PROFILE
    * ---------------------------------------------------------
    *
-   * This flow loads ONLY the selected patient.
-   *
-   * It never loads the logged-in user's own profile.
+   * Only the selected patient is loaded.
    */
   const patientQuery = useQuery({
     queryKey: ["patient", patientId],
@@ -118,16 +75,17 @@ function PatientCheckerPage() {
       }),
   });
 
-  /**
+  /*
    * ---------------------------------------------------------
    * PATIENT-ONLY HISTORY
    * ---------------------------------------------------------
    *
-   * This graph/history source is completely separate from:
+   * IMPORTANT:
    *
-   * ["checks"]
+   * This does NOT use listChecks().
    *
-   * used by the logged-in user's own symptom checker.
+   * Therefore the logged-in user's own ["checks"] history
+   * can never be mixed into this graph.
    */
   const historyQuery = useQuery({
     queryKey: ["patient-checks", patientId],
@@ -140,384 +98,130 @@ function PatientCheckerPage() {
       }),
   });
 
-  const patient = patientQuery.data;
-
-  /**
-   * Patient profile is contextual information.
-   *
-   * It is NOT treated as current symptoms.
-   */
-  const patientContext = useMemo(() => {
-    if (!patient) {
-      return undefined;
-    }
-
-    return {
-      name: patient.name,
-      age: patient.age ?? "",
-      sex: patient.sex ?? "",
-      allergies: patient.allergies ?? "",
-      existingConditions:
-        patient.existing_conditions ?? "",
-      currentMedications:
-        patient.current_medications ?? "",
-      previousMajorIllnesses:
-        patient.previous_major_illnesses ?? "",
-      smokingStatus:
-        patient.smoking_status ?? "",
-      familyHistory:
-        patient.family_history ?? "",
-      pregnancyStatus:
-        patient.pregnancy_status ?? "",
-    };
-  }, [patient]);
-
-  /**
-   * ---------------------------------------------------------
-   * BASE INPUT
-   * ---------------------------------------------------------
-   *
-   * IMPORTANT:
-   *
-   * patientProfile is NOT passed to the generic
-   * ContextInput used by the self checker.
-   *
-   * Patient assessment functions receive patientId and
-   * retrieve the patient profile securely on the server.
-   */
-  function baseInput() {
-    return {
-      patientId,
-      symptoms: symptoms.trim(),
-      duration: duration.trim() || undefined,
-      language: lang,
-    };
-  }
-
-  /**
-   * Emergency screening deliberately uses only
-   * patient-reported symptom/answer content.
-   *
-   * The patient's profile is not converted into symptoms.
-   */
-  async function runImmediateAssessment(
-    extraAnswers: AnswerPair[] = [],
-  ) {
-    return immediateEmergencyAssessment({
-      symptoms: symptoms.trim(),
-      age: patient?.age?.trim() || undefined,
-      sex: patient?.sex?.trim() || undefined,
-      duration: duration.trim() || undefined,
-      language: lang,
-      answers: extraAnswers,
-    });
-  }
-
-  /**
-   * ---------------------------------------------------------
-   * FOLLOW-UP QUESTIONS
-   * ---------------------------------------------------------
-   */
-  const questionsMutation = useMutation({
-    mutationFn: async () => {
-      return getPatientFollowUpQuestions({
-        data: baseInput(),
-      });
-    },
-
-    onSuccess: (data) => {
-      if (!data || data.length === 0) {
-        assessMutation.mutate({
-          answers: [],
-        });
-        return;
-      }
-
-      setQuestions(data);
-      setAnswers(new Array(data.length).fill(""));
-      setStep(0);
-      setDraft("");
-      setStage("questions");
-    },
-  });
-
-  /**
-   * ---------------------------------------------------------
-   * PATIENT ASSESSMENT
-   * ---------------------------------------------------------
-   */
-  const assessMutation = useMutation({
-    mutationFn: async ({
-      answers: answerPairs,
-    }: {
-      answers: AnswerPair[];
-    }) => {
-      return assessPatientSymptoms({
+  const removeMutation = useMutation({
+    mutationFn: (id: string) =>
+      deleteCheck({
         data: {
-          ...baseInput(),
-          answers: answerPairs,
+          id,
         },
-      });
-    },
+      }),
 
-    onSuccess: (result) => {
-      setAssessment(result);
-      setStage("result");
-    },
-  });
-
-  /**
-   * ---------------------------------------------------------
-   * PATIENT CHECK SAVE
-   * ---------------------------------------------------------
-   */
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      if (!assessment || !patient) {
-        throw new Error(
-          "Assessment or patient profile is missing.",
-        );
-      }
-
-      const { likelihood, condition } =
-        topRisk(assessment);
-
-      const answerPairs: AnswerPair[] = questions.map(
-        (question, index) => ({
-          question: question.question,
-          answer: answers[index] ?? "",
-        }),
-      );
-
-      /**
-       * Only patient-reported content is sent to vital
-       * extraction.
-       *
-       * Question text is deliberately excluded so that
-       * numbers inside questions cannot become false vitals.
-       */
-      const vitals = extractVitals(
-        [
-          symptoms,
-          duration,
-          ...answerPairs.map(
-            (item) => item.answer,
-          ),
-        ].join("\n"),
-      );
-
-      return saveCheck({
-        data: {
-          symptoms: symptoms.trim(),
-
-          /**
-           * This is MATCH STRENGTH, not diagnostic
-           * probability/risk percentage.
-           */
-          severity: likelihood,
-
-          urgency: assessment.urgency,
-
-          topCondition:
-            condition?.name ?? "No specific match",
-
-          summary: assessment.summary,
-
-          answers: answerPairs,
-
-          redFlag:
-            assessment.redFlags.length > 0,
-
-          redFlags: assessment.redFlags,
-
-          categories:
-            condition?.matchingSymptoms ?? [],
-
-          supportingFactors:
-            condition?.contributingFactors ?? [],
-
-          vitals,
-
-          uncertainty:
-            assessment.uncertainty.join("\n"),
-
-          nextStep:
-            assessment.nextStep,
-
-          /**
-           * CRITICAL:
-           *
-           * This record belongs to the patient only.
-           */
-          subjectType: "patient",
-
-          patientId: patient.id,
-        },
-      });
-    },
-
-    onSuccess: (result) => {
-      /**
-       * Only mark as saved after the actual database
-       * mutation succeeds and return the real record ID.
-       */
-      setSavedId(result.id);
-      setSaveError(null);
-
+    onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ["patient-checks", patientId],
       });
     },
-
-    onError: (error) => {
-      setSaveError(
-        error instanceof Error
-          ? error.message
-          : "Unable to save this check.",
-      );
-    },
   });
 
-  /**
-   * ---------------------------------------------------------
-   * START PATIENT CHECK
-   * ---------------------------------------------------------
-   */
-  async function startCheck() {
-    if (!symptoms.trim() || questionsMutation.isPending) {
-      return;
-    }
+  const patient = patientQuery.data;
 
-    setSaveError(null);
-    setSavedId(null);
-    setAssessment(null);
+  const history: HistoryEntry[] =
+    historyQuery.data ?? [];
 
-    /**
-     * Emergency screening MUST be awaited.
-     *
-     * Previously the Promise itself was checked, which
-     * could incorrectly behave as if every check were
-     * an emergency.
-     */
-    const emergency =
-      await runImmediateAssessment([]);
+  const sortedHistory = useMemo(() => {
+    return [...history].sort(
+      (a, b) =>
+        new Date(a.date).getTime() -
+        new Date(b.date).getTime(),
+    );
+  }, [history]);
 
-    if (emergency) {
-      setAssessment(emergency);
-      setStage("result");
-      return;
-    }
+  const latestSeverity =
+    sortedHistory.length > 0
+      ? clampSeverity(
+          Number(
+            sortedHistory[sortedHistory.length - 1]
+              .severity,
+          ),
+        )
+      : 0;
 
-    questionsMutation.mutate();
-  }
+  const previousSeverity =
+    sortedHistory.length > 1
+      ? clampSeverity(
+          Number(
+            sortedHistory[sortedHistory.length - 2]
+              .severity,
+          ),
+        )
+      : null;
 
-  /**
-   * ---------------------------------------------------------
-   * ANSWER CURRENT QUESTION
-   * ---------------------------------------------------------
-   */
-  async function answerCurrentQuestion(
-    answer: string,
-  ) {
-    const cleanAnswer = answer.trim();
+  const trend =
+    previousSeverity === null
+      ? "stable"
+      : latestSeverity > previousSeverity
+        ? "up"
+        : latestSeverity < previousSeverity
+          ? "down"
+          : "stable";
 
-    if (!cleanAnswer) {
-      return;
-    }
+  const averageSeverity =
+    sortedHistory.length > 0
+      ? sortedHistory.reduce(
+          (sum, entry) =>
+            sum +
+            clampSeverity(Number(entry.severity)),
+          0,
+        ) / sortedHistory.length
+      : 0;
 
-    const nextAnswers = [...answers];
-    nextAnswers[step] = cleanAnswer;
-
-    setAnswers(nextAnswers);
-
-    const pairs: AnswerPair[] = questions
-      .slice(0, step + 1)
-      .map((question, index) => ({
-        question: question.question,
-        answer: nextAnswers[index] ?? "",
-      }));
-
-    /**
-     * Check emergency signals using the patient's actual
-     * answers, not merely the follow-up question text.
-     */
-    const emergency =
-      await runImmediateAssessment(pairs);
-
-    if (emergency) {
-      setAssessment(emergency);
-      setStage("result");
-      return;
-    }
-
-    if (step < questions.length - 1) {
-      setStep(step + 1);
-      setDraft("");
-      return;
-    }
-
-    assessMutation.mutate({
-      answers: questions.map(
-        (question, index) => ({
-          question: question.question,
-          answer: nextAnswers[index] ?? "",
-        }),
-      ),
-    });
-  }
-
-  /**
+  /*
    * ---------------------------------------------------------
    * LOADING
    * ---------------------------------------------------------
    */
   if (patientQuery.isLoading) {
     return (
-      <main className="min-h-screen px-4 py-8">
-        <div className="mx-auto max-w-3xl">
+      <main className="min-h-screen bg-background">
+        <ProfileMenu />
+
+        <div className="mx-auto flex min-h-[70vh] max-w-4xl items-center justify-center px-5">
           <div
-            className="flex items-center justify-center py-24"
+            className="flex items-center gap-3 text-sm text-muted-foreground"
             aria-live="polite"
           >
-            <Loader2
-              className="h-7 w-7 animate-spin"
-              aria-hidden="true"
-            />
-            <span className="sr-only">
-              Loading patient profile
-            </span>
+            <Loader2 className="size-5 animate-spin" />
+            Loading patient history…
           </div>
         </div>
       </main>
     );
   }
 
-  /**
+  /*
    * ---------------------------------------------------------
    * PATIENT NOT FOUND / ACCESS ERROR
    * ---------------------------------------------------------
    */
   if (patientQuery.error || !patient) {
     return (
-      <main className="min-h-screen px-4 py-8">
-        <div className="mx-auto max-w-3xl">
-          <Card>
+      <main className="min-h-screen bg-background">
+        <ProfileMenu />
+
+        <div className="mx-auto max-w-3xl px-5 py-10 sm:py-16">
+          <Button asChild variant="ghost" size="sm">
+            <Link to="/patients">
+              <ArrowLeft className="mr-2 size-4" />
+              Back to Patients
+            </Link>
+          </Button>
+
+          <Card className="mt-6">
             <CardHeader>
               <CardTitle>
                 Patient profile not found
               </CardTitle>
 
               <CardDescription>
-                This patient may have been deleted or
-                may not belong to your account.
+                This patient may have been deleted or may
+                not belong to your account.
               </CardDescription>
             </CardHeader>
 
             <CardContent>
               <Button asChild>
                 <Link to="/patients">
-                  <ArrowLeft className="mr-2 h-4 w-4" />
-                  Back to Patients
+                  Go to Patients
                 </Link>
               </Button>
             </CardContent>
@@ -527,176 +231,53 @@ function PatientCheckerPage() {
     );
   }
 
-  /**
+  /*
    * ---------------------------------------------------------
-   * RESULT
-   * ---------------------------------------------------------
-   */
-  if (stage === "result" && assessment) {
-    return (
-      <PatientResult
-        patient={patient}
-        patientId={patientId}
-        assessment={assessment}
-        symptoms={symptoms}
-        savedId={savedId}
-        saveError={saveError}
-        saving={saveMutation.isPending}
-        onSave={() => saveMutation.mutate()}
-        onRestart={() => {
-          setStage("intake");
-          setSymptoms("");
-          setDuration("");
-          setQuestions([]);
-          setAnswers([]);
-          setStep(0);
-          setDraft("");
-          setAssessment(null);
-          setSavedId(null);
-          setSaveError(null);
-        }}
-      />
-    );
-  }
-
-  /**
-   * ---------------------------------------------------------
-   * QUESTIONS
+   * ERROR LOADING HISTORY
    * ---------------------------------------------------------
    */
-  if (stage === "questions") {
-    const currentQuestion = questions[step];
-
-    if (!currentQuestion) {
-      return null;
-    }
-
+  if (historyQuery.isError) {
     return (
-      <main className="min-h-screen px-4 py-6">
-        <div className="mx-auto max-w-3xl">
-          <header className="mb-6">
+      <main className="min-h-screen bg-background">
+        <ProfileMenu />
+
+        <div className="mx-auto max-w-4xl px-5 py-10 sm:py-16">
+          <Button asChild variant="ghost" size="sm">
             <Link
-              to="/patients"
-              className="inline-flex items-center text-sm opacity-70 hover:opacity-100"
+              to="/patient-checker/$patientId"
+              params={{
+                patientId,
+              }}
             >
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Patients
+              <ArrowLeft className="mr-2 size-4" />
+              Back to Patient Check
             </Link>
-          </header>
-
-          <PatientHeader
-            name={patient.name}
-            age={patient.age}
-            sex={patient.sex}
-          />
+          </Button>
 
           <Card className="mt-6">
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <MessageCircleQuestion
-                  className="h-5 w-5"
-                  aria-hidden="true"
-                />
-
-                <CardTitle>
-                  Follow-up question
-                </CardTitle>
+            <CardContent className="flex min-h-56 flex-col items-center justify-center text-center">
+              <div className="flex size-12 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+                <Activity className="size-6" />
               </div>
 
-              <CardDescription>
-                Question {step + 1} of{" "}
-                {questions.length}
-              </CardDescription>
-            </CardHeader>
+              <h2 className="mt-4 font-semibold">
+                Unable to load patient history
+              </h2>
 
-            <CardContent className="space-y-6">
-              <div>
-                <h2 className="text-xl font-semibold leading-relaxed">
-                  {currentQuestion.question}
-                </h2>
+              <p className="mt-2 max-w-md text-sm text-muted-foreground">
+                Something went wrong while loading the
+                saved checks for this patient.
+              </p>
 
-                {currentQuestion.why && (
-                  <p className="mt-3 text-sm opacity-70">
-                    {currentQuestion.why}
-                  </p>
-                )}
-              </div>
-
-              {currentQuestion.options?.length ? (
-                <div className="grid gap-3">
-                  {currentQuestion.options.map(
-                    (option) => (
-                      <Button
-                        key={option}
-                        type="button"
-                        variant={
-                          answers[step] === option
-                            ? "default"
-                            : "outline"
-                        }
-                        className="min-h-12 justify-start whitespace-normal text-left"
-                        disabled={
-                          assessMutation.isPending
-                        }
-                        onClick={() =>
-                          answerCurrentQuestion(
-                            option,
-                          )
-                        }
-                      >
-                        {option}
-                      </Button>
-                    ),
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <Textarea
-                    value={draft}
-                    onChange={(event) =>
-                      setDraft(event.target.value)
-                    }
-                    placeholder="Type your answer..."
-                    rows={4}
-                    disabled={
-                      assessMutation.isPending
-                    }
-                  />
-
-                  <Button
-                    type="button"
-                    disabled={
-                      !draft.trim() ||
-                      assessMutation.isPending
-                    }
-                    onClick={() =>
-                      answerCurrentQuestion(
-                        draft.trim(),
-                      )
-                    }
-                  >
-                    Continue
-                  </Button>
-                </div>
-              )}
-
-              {assessMutation.isPending && (
-                <div
-                  className="flex items-center gap-2 text-sm opacity-70"
-                  aria-live="polite"
-                >
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Assessing...
-                </div>
-              )}
-
-              {assessMutation.error && (
-                <p className="text-sm text-destructive">
-                  {assessMutation.error instanceof Error
-                    ? assessMutation.error.message
-                    : "Unable to assess the symptoms."}
-                </p>
-              )}
+              <Button
+                className="mt-5"
+                variant="outline"
+                onClick={() =>
+                  historyQuery.refetch()
+                }
+              >
+                Try Again
+              </Button>
             </CardContent>
           </Card>
         </div>
@@ -704,133 +285,308 @@ function PatientCheckerPage() {
     );
   }
 
-  /**
+  /*
    * ---------------------------------------------------------
-   * INTAKE
+   * MAIN PAGE
    * ---------------------------------------------------------
    */
   return (
-    <main className="min-h-screen px-4 py-6">
-      <div className="mx-auto max-w-3xl">
-        <header className="mb-6">
+    <main className="min-h-screen bg-background">
+      <ProfileMenu />
+
+      <div className="mx-auto w-full max-w-4xl space-y-6 px-5 py-8 sm:py-12">
+        <Button asChild variant="ghost" size="sm">
           <Link
-            to="/patients"
-            className="inline-flex items-center text-sm opacity-70 hover:opacity-100"
+            to="/patient-checker/$patientId"
+            params={{
+              patientId,
+            }}
           >
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Patients
+            <ArrowLeft className="mr-2 size-4" />
+            Back to Patient Check
           </Link>
-        </header>
+        </Button>
 
-        <PatientHeader
-          name={patient.name}
-          age={patient.age}
-          sex={patient.sex}
-        />
+        {/* -------------------------------------------------
+            PATIENT HEADER
+        -------------------------------------------------- */}
+        <section className="flex items-center gap-4">
+          <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <UserRound className="size-6" />
+          </div>
 
-        <Card className="mt-6">
-          <CardHeader>
-            <CardTitle>
-              Check symptoms for {patient.name}
-            </CardTitle>
+          <div className="min-w-0">
+            <p className="text-sm text-muted-foreground">
+              Patient history
+            </p>
 
-            <CardDescription>
-              This symptom check, assessment and history
-              are stored separately from your own
-              symptom history.
-            </CardDescription>
-          </CardHeader>
+            <h1 className="truncate text-2xl font-semibold tracking-tight sm:text-3xl">
+              {patient.name}
+            </h1>
 
-          <CardContent className="space-y-6">
-            <div className="rounded-xl border p-4">
-              <div className="flex items-start gap-3">
-                <ShieldAlert
-                  className="mt-0.5 h-5 w-5 shrink-0"
-                  aria-hidden="true"
+            <p className="mt-1 text-sm text-muted-foreground">
+              {[patient.age, patient.sex]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          </div>
+        </section>
+
+        {/* -------------------------------------------------
+            SEPARATION NOTICE
+        -------------------------------------------------- */}
+        <div className="rounded-xl border bg-muted/40 px-4 py-3">
+          <p className="text-sm leading-6 text-muted-foreground">
+            This is <span className="font-medium text-foreground">
+              {patient.name}
+            </span>
+            's separate symptom history. It does not
+            include your own self-check history.
+          </p>
+        </div>
+
+        {/* -------------------------------------------------
+            EMPTY STATE
+        -------------------------------------------------- */}
+        {history.length === 0 ? (
+          <Card>
+            <CardContent className="flex min-h-72 flex-col items-center justify-center px-6 text-center">
+              <div className="flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <BarChart3 className="size-7" />
+              </div>
+
+              <h2 className="mt-5 text-lg font-semibold">
+                No symptom history yet
+              </h2>
+
+              <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
+                No saved symptom checks have been recorded
+                for {patient.name} yet.
+              </p>
+
+              <Button asChild className="mt-6">
+                <Link
+                  to="/patient-checker/$patientId"
+                  params={{
+                    patientId,
+                  }}
+                >
+                  Start Patient Symptom Check
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            {/* -------------------------------------------------
+                SUMMARY CARDS
+            -------------------------------------------------- */}
+            <section
+              aria-label="Patient symptom history summary"
+              className="grid gap-4 sm:grid-cols-3"
+            >
+              <SummaryCard
+                icon={
+                  <CalendarDays className="size-5" />
+                }
+                label="Saved checks"
+                value={String(history.length)}
+              />
+
+              <SummaryCard
+                icon={
+                  <Activity className="size-5" />
+                }
+                label="Latest severity"
+                value={`${formatSeverity(
+                  latestSeverity,
+                )}/10`}
+              />
+
+              <SummaryCard
+                icon={
+                  trend === "up" ? (
+                    <TrendingUp className="size-5" />
+                  ) : trend === "down" ? (
+                    <TrendingDown className="size-5" />
+                  ) : (
+                    <Activity className="size-5" />
+                  )
+                }
+                label="Recent trend"
+                value={
+                  trend === "up"
+                    ? "Higher"
+                    : trend === "down"
+                      ? "Lower"
+                      : "Stable"
+                }
+              />
+            </section>
+
+            {/* -------------------------------------------------
+                GRAPH
+            -------------------------------------------------- */}
+            <Card className="overflow-hidden">
+              <CardHeader className="pb-2">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <BarChart3 className="size-5" />
+                      Symptom Severity Trend
+                    </CardTitle>
+
+                    <CardDescription className="mt-1">
+                      Severity recorded across{" "}
+                      {patient.name}'s saved symptom
+                      checks.
+                    </CardDescription>
+                  </div>
+
+                  <Badge variant="secondary">
+                    {history.length}{" "}
+                    {history.length === 1
+                      ? "check"
+                      : "checks"}
+                  </Badge>
+                </div>
+              </CardHeader>
+
+              <CardContent className="pt-5">
+                <SeverityGraph
+                  entries={sortedHistory}
                 />
 
-                <div>
-                  <p className="font-medium">
-                    Patient-specific assessment
-                  </p>
+                <div className="mt-5 flex items-start justify-between gap-4 text-xs text-muted-foreground">
+                  <span>0 — Minimal</span>
 
-                  <p className="mt-1 text-sm opacity-70">
-                    The assessment uses this patient's
-                    profile information and this
-                    patient's previous checks only.
-                  </p>
+                  <span className="text-center">
+                    Severity scale
+                  </span>
+
+                  <span>10 — Severe</span>
                 </div>
+
+                <Separator className="my-5" />
+
+                <div className="rounded-lg bg-muted/50 px-4 py-3 text-xs leading-5 text-muted-foreground">
+                  This graph shows the severity recorded
+                  during saved checks. It is a history and
+                  trend view, not a diagnosis or a clinically
+                  validated probability.
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* -------------------------------------------------
+                OVERVIEW
+            -------------------------------------------------- */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">
+                  History overview
+                </CardTitle>
+
+                <CardDescription>
+                  Average recorded severity across this
+                  patient's saved checks:{" "}
+                  <span className="font-medium text-foreground">
+                    {averageSeverity.toFixed(1)}/10
+                  </span>
+                  .
+                </CardDescription>
+              </CardHeader>
+
+              <CardContent>
+                <div className="space-y-3">
+                  {sortedHistory
+                    .slice()
+                    .reverse()
+                    .slice(0, 5)
+                    .map((entry) => (
+                      <HistorySummaryRow
+                        key={entry.id}
+                        entry={entry}
+                      />
+                    ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* -------------------------------------------------
+                FULL TIMELINE
+            -------------------------------------------------- */}
+            <section>
+              <div className="mb-4">
+                <h2 className="text-xl font-semibold">
+                  Saved checks
+                </h2>
+
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Review or remove individual entries from{" "}
+                  {patient.name}'s history.
+                </p>
               </div>
-            </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="patient-symptoms">
-                What symptoms does {patient.name} have?
-              </Label>
-
-              <Textarea
-                id="patient-symptoms"
-                value={symptoms}
-                onChange={(event) =>
-                  setSymptoms(event.target.value)
+              <SymptomTimeline
+                entries={history}
+                onRemove={(id) =>
+                  removeMutation.mutate(id)
                 }
-                placeholder="Describe the symptoms..."
-                rows={6}
               />
-            </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="patient-duration">
-                How long have the symptoms been present?
-              </Label>
-
-              <Input
-                id="patient-duration"
-                value={duration}
-                onChange={(event) =>
-                  setDuration(event.target.value)
-                }
-                placeholder="For example: 2 days"
-              />
-            </div>
-
-            <Button
-              className="w-full"
-              size="lg"
-              disabled={
-                !symptoms.trim() ||
-                questionsMutation.isPending
-              }
-              onClick={startCheck}
-            >
-              {questionsMutation.isPending ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Preparing questions...
-                </>
-              ) : (
-                <>
-                  Check Symptoms
-                  <ChevronDown className="ml-2 h-4 w-4 rotate-[-90deg]" />
-                </>
+              {removeMutation.isPending && (
+                <div
+                  className="mt-3 flex items-center justify-end gap-2 text-xs text-muted-foreground"
+                  aria-live="polite"
+                >
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Removing history entry…
+                </div>
               )}
-            </Button>
 
-            {questionsMutation.error && (
-              <p className="text-sm text-destructive">
-                {questionsMutation.error instanceof Error
-                  ? questionsMutation.error.message
-                  : "Unable to start the symptom check."}
-              </p>
-            )}
-          </CardContent>
-        </Card>
+              {removeMutation.isError && (
+                <p
+                  className="mt-3 text-right text-xs text-destructive"
+                  role="alert"
+                >
+                  Could not remove this history entry.
+                  Please try again.
+                </p>
+              )}
+            </section>
+          </>
+        )}
 
-        <PatientHistoryPreview
-          patientId={patientId}
-          history={historyQuery.data ?? []}
-          loading={historyQuery.isLoading}
-        />
+        {/* -------------------------------------------------
+            FOOTER ACTIONS
+        -------------------------------------------------- */}
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <Button
+            asChild
+            variant="outline"
+            className="flex-1"
+          >
+            <Link
+              to="/patient-checker/$patientId"
+              params={{
+                patientId,
+              }}
+            >
+              Check {patient.name}'s Symptoms
+            </Link>
+          </Button>
+
+          <Button
+            asChild
+            variant="outline"
+            className="flex-1"
+          >
+            <Link to="/patients">
+              All Patient Profiles
+            </Link>
+          </Button>
+        </div>
       </div>
     </main>
   );
@@ -838,146 +594,34 @@ function PatientCheckerPage() {
 
 /**
  * ---------------------------------------------------------
- * PATIENT HEADER
+ * SUMMARY CARD
  * ---------------------------------------------------------
  */
-function PatientHeader({
-  name,
-  age,
-  sex,
+function SummaryCard({
+  icon,
+  label,
+  value,
 }: {
-  name: string;
-  age?: string | null;
-  sex?: string | null;
+  icon: React.ReactNode;
+  label: string;
+  value: string;
 }) {
   return (
-    <div className="flex items-center gap-4">
-      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
-        <UserRound
-          className="h-7 w-7"
-          aria-hidden="true"
-        />
-      </div>
+    <Card>
+      <CardContent className="flex items-center gap-4 p-5">
+        <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
+          {icon}
+        </div>
 
-      <div>
-        <p className="text-sm opacity-60">
-          Symptom check for
-        </p>
+        <div className="min-w-0">
+          <p className="text-xs text-muted-foreground">
+            {label}
+          </p>
 
-        <h1 className="text-2xl font-bold">
-          {name}
-        </h1>
-
-        <p className="text-sm opacity-70">
-          {[age, sex].filter(Boolean).join(" · ")}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-/**
- * ---------------------------------------------------------
- * PATIENT HISTORY PREVIEW
- * ---------------------------------------------------------
- */
-function PatientHistoryPreview({
-  patientId,
-  history,
-  loading,
-}: {
-  patientId: string;
-
-  history: Array<{
-    id: string;
-    date: string;
-    symptoms: string;
-    severity: number;
-    urgency: string;
-    topCondition: string;
-    summary: string;
-  }>;
-
-  loading: boolean;
-}) {
-  const latest = [...history]
-    .sort(
-      (a, b) =>
-        new Date(b.date).getTime() -
-        new Date(a.date).getTime(),
-    )
-    .slice(0, 3);
-
-  return (
-    <Card className="mt-6">
-      <CardHeader>
-        <CardTitle>
-          {history.length > 0
-            ? "This patient's symptom history"
-            : "Patient history"}
-        </CardTitle>
-
-        <CardDescription>
-          Only {history.length} check
-          {history.length === 1 ? "" : "s"} saved
-          for this patient.
-        </CardDescription>
-      </CardHeader>
-
-      <CardContent>
-        {loading ? (
-          <div
-            className="flex items-center gap-2 py-6 text-sm opacity-70"
-            aria-live="polite"
-          >
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Loading patient history...
-          </div>
-        ) : history.length === 0 ? (
-          <div className="py-6 text-sm opacity-70">
-            No previous symptom checks for this patient.
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {latest.map((item) => (
-              <div
-                key={item.id}
-                className="rounded-xl border p-4"
-              >
-                <div className="flex items-center gap-2 text-xs opacity-60">
-                  <Clock3 className="h-3.5 w-3.5" />
-
-                  {new Date(
-                    item.date,
-                  ).toLocaleDateString()}
-                </div>
-
-                <p className="mt-2 font-medium">
-                  {item.symptoms}
-                </p>
-
-                <p className="mt-1 text-sm opacity-70">
-                  Match strength: {item.severity}%
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <Button
-          asChild
-          variant="outline"
-          className="mt-5 w-full"
-        >
-          <Link
-            to="/patient-history/$patientId"
-            params={{
-              patientId,
-            }}
-          >
-            View Full Patient History
-          </Link>
-        </Button>
+          <p className="mt-1 text-lg font-semibold">
+            {value}
+          </p>
+        </div>
       </CardContent>
     </Card>
   );
@@ -985,324 +629,251 @@ function PatientHistoryPreview({
 
 /**
  * ---------------------------------------------------------
- * PATIENT RESULT
+ * HISTORY SUMMARY ROW
  * ---------------------------------------------------------
  */
-function PatientResult({
-  patient,
-  patientId,
-  assessment,
-  symptoms,
-  savedId,
-  saveError,
-  saving,
-  onSave,
-  onRestart,
+function HistorySummaryRow({
+  entry,
 }: {
-  patient: {
-    id: string;
-    name: string;
-    age?: string | null;
-    sex?: string | null;
-  };
-
-  patientId: string;
-
-  assessment: Assessment;
-
-  symptoms: string;
-
-  savedId: string | null;
-
-  saveError: string | null;
-
-  saving: boolean;
-
-  onSave: () => void;
-
-  onRestart: () => void;
+  entry: HistoryEntry;
 }) {
-  const { likelihood, condition } =
-    topRisk(assessment);
-
-  /**
-   * Emergency and urgent are intentionally separate.
-   */
-  const isEmergency =
-    assessment.urgency === "emergency";
-
-  const isUrgent =
-    assessment.urgency === "urgent";
+  const severity = clampSeverity(
+    Number(entry.severity),
+  );
 
   return (
-    <main className="min-h-screen px-4 py-6">
-      <div className="mx-auto max-w-3xl">
-        <Link
-          to="/patients"
-          className="inline-flex items-center text-sm opacity-70 hover:opacity-100"
+    <div className="flex items-center justify-between gap-4 rounded-lg border bg-background px-4 py-3">
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium">
+          {entry.symptoms || "Symptom check"}
+        </p>
+
+        <p className="mt-1 text-xs text-muted-foreground">
+          {formatDate(entry.date)}
+        </p>
+      </div>
+
+      <Badge variant="outline" className="shrink-0">
+        {formatSeverity(severity)}/10
+      </Badge>
+    </div>
+  );
+}
+
+/**
+ * ---------------------------------------------------------
+ * SEVERITY GRAPH
+ * ---------------------------------------------------------
+ */
+function SeverityGraph({
+  entries,
+}: {
+  entries: HistoryEntry[];
+}) {
+  const width = 760;
+  const height = 280;
+
+  const padding = {
+    top: 22,
+    right: 24,
+    bottom: 48,
+    left: 44,
+  };
+
+  const chartWidth =
+    width - padding.left - padding.right;
+
+  const chartHeight =
+    height - padding.top - padding.bottom;
+
+  const points = entries.map((entry, index) => {
+    const severity = clampSeverity(
+      Number(entry.severity),
+    );
+
+    const x =
+      entries.length === 1
+        ? padding.left + chartWidth / 2
+        : padding.left +
+          (index / (entries.length - 1)) *
+            chartWidth;
+
+    const y =
+      padding.top +
+      chartHeight -
+      (severity / 10) * chartHeight;
+
+    return {
+      x,
+      y,
+      severity,
+      entry,
+    };
+  });
+
+  const path =
+    points.length > 1
+      ? points
+          .map((point, index) =>
+            index === 0
+              ? `M ${point.x} ${point.y}`
+              : `L ${point.x} ${point.y}`,
+          )
+          .join(" ")
+      : "";
+
+  const gridValues = [0, 2, 4, 6, 8, 10];
+
+  return (
+    <div className="w-full overflow-x-auto">
+      <div className="min-w-[620px]">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="h-auto w-full overflow-visible"
+          role="img"
+          aria-label={`${entries.length} saved symptom checks shown on a symptom severity trend graph`}
         >
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Back to Patients
-        </Link>
+          {gridValues.map((value) => {
+            const y =
+              padding.top +
+              chartHeight -
+              (value / 10) * chartHeight;
 
-        <div className="mt-6">
-          <PatientHeader
-            name={patient.name}
-            age={patient.age}
-            sex={patient.sex}
-          />
-        </div>
-
-        <Card
-          className={`mt-6 ${
-            isEmergency
-              ? "border-destructive"
-              : ""
-          }`}
-        >
-          <CardHeader>
-            <CardTitle>
-              Assessment for {patient.name}
-            </CardTitle>
-
-            <CardDescription>
-              This result belongs only to this patient.
-            </CardDescription>
-          </CardHeader>
-
-          <CardContent className="space-y-6">
-            {(isEmergency || isUrgent) && (
-              <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-4">
-                <div className="flex gap-3">
-                  <ShieldAlert
-                    className="h-5 w-5 shrink-0"
-                    aria-hidden="true"
-                  />
-
-                  <div>
-                    <p className="font-semibold">
-                      {isEmergency
-                        ? "Emergency attention may be needed"
-                        : "Prompt medical attention may be needed"}
-                    </p>
-
-                    {assessment.urgencyReason && (
-                      <p className="mt-1 text-sm opacity-80">
-                        {assessment.urgencyReason}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div>
-              <p className="text-sm opacity-60">
-                Symptom match strength
-              </p>
-
-              <p className="mt-1 text-4xl font-bold">
-                {likelihood}%
-              </p>
-
-              <p className="mt-1 text-sm opacity-60">
-                This is a symptom-match indicator, not a
-                medically validated probability or
-                diagnosis.
-              </p>
-            </div>
-
-            <div>
-              <p className="text-sm opacity-60">
-                Reported symptoms
-              </p>
-
-              <p className="mt-2 leading-relaxed">
-                {symptoms}
-              </p>
-            </div>
-
-            <div>
-              <p className="text-sm opacity-60">
-                Summary
-              </p>
-
-              <p className="mt-2 leading-relaxed">
-                {assessment.summary}
-              </p>
-            </div>
-
-            {condition && (
-              <div className="rounded-xl border p-4">
-                <p className="text-sm opacity-60">
-                  Possible match
-                </p>
-
-                <h2 className="mt-1 text-lg font-semibold">
-                  {condition.name}
-                </h2>
-
-                {condition.explanation && (
-                  <p className="mt-2 text-sm leading-relaxed opacity-80">
-                    {condition.explanation}
-                  </p>
-                )}
-              </div>
-            )}
-
-            {assessment.nextStep && (
-              <div>
-                <p className="text-sm opacity-60">
-                  Recommended next step
-                </p>
-
-                <p className="mt-2 leading-relaxed">
-                  {assessment.nextStep}
-                </p>
-              </div>
-            )}
-
-            {assessment.generalAdvice.length > 0 && (
-              <div>
-                <p className="text-sm opacity-60">
-                  General advice
-                </p>
-
-                <ul className="mt-2 space-y-2">
-                  {assessment.generalAdvice.map(
-                    (advice) => (
-                      <li
-                        key={advice}
-                        className="rounded-lg border p-3 text-sm"
-                      >
-                        {advice}
-                      </li>
-                    ),
-                  )}
-                </ul>
-              </div>
-            )}
-
-            {assessment.redFlags.length > 0 && (
-              <div className="rounded-xl border border-destructive/40 p-4">
-                <div className="flex items-center gap-2">
-                  <ShieldAlert
-                    className="h-5 w-5"
-                    aria-hidden="true"
-                  />
-
-                  <p className="font-semibold">
-                    Warning signs
-                  </p>
-                </div>
-
-                <ul className="mt-3 space-y-2 text-sm">
-                  {assessment.redFlags.map(
-                    (flag) => (
-                      <li key={flag}>
-                        • {flag}
-                      </li>
-                    ),
-                  )}
-                </ul>
-              </div>
-            )}
-
-            <div className="rounded-xl border p-4">
-              <p className="text-xs opacity-60">
-                Patient
-              </p>
-
-              <p className="mt-1 font-medium">
-                {patient.name}
-              </p>
-
-              <p className="text-sm opacity-70">
-                This assessment is stored separately from
-                your own symptom history.
-              </p>
-            </div>
-
-            {savedId ? (
-              <div className="flex items-center gap-2 rounded-xl border p-4">
-                <CheckCircle2
-                  className="h-5 w-5"
-                  aria-hidden="true"
+            return (
+              <g key={value}>
+                <line
+                  x1={padding.left}
+                  x2={width - padding.right}
+                  y1={y}
+                  y2={y}
+                  stroke="currentColor"
+                  strokeOpacity="0.12"
+                  strokeWidth="1"
                 />
 
-                <div>
-                  <p className="font-medium">
-                    Check saved
-                  </p>
-
-                  <p className="text-sm opacity-70">
-                    Saved to {patient.name}'s history.
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <Button
-                className="w-full"
-                size="lg"
-                disabled={saving}
-                onClick={onSave}
-              >
-                {saving ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  <>
-                    <Save className="mr-2 h-4 w-4" />
-                    Save to {patient.name}'s History
-                  </>
-                )}
-              </Button>
-            )}
-
-            {saveError && (
-              <p
-                className="text-sm text-destructive"
-                role="alert"
-              >
-                {saveError}
-              </p>
-            )}
-
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={onRestart}
-              >
-                Check Again
-              </Button>
-
-              <Button
-                variant="outline"
-                className="flex-1"
-                asChild
-              >
-                <Link
-                  to="/patient-history/$patientId"
-                  params={{
-                    patientId,
-                  }}
+                <text
+                  x={padding.left - 10}
+                  y={y + 4}
+                  textAnchor="end"
+                  className="fill-muted-foreground text-[11px]"
                 >
-                  View History
-                </Link>
-              </Button>
-            </div>
+                  {value}
+                </text>
+              </g>
+            );
+          })}
 
-            <p className="text-center text-xs leading-relaxed opacity-60">
-              SymptomScope provides informational
-              symptom assessment and does not replace a
-              qualified healthcare professional.
-            </p>
-          </CardContent>
-        </Card>
+          <line
+            x1={padding.left}
+            x2={padding.left}
+            y1={padding.top}
+            y2={padding.top + chartHeight}
+            stroke="currentColor"
+            strokeOpacity="0.18"
+          />
+
+          <line
+            x1={padding.left}
+            x2={width - padding.right}
+            y1={padding.top + chartHeight}
+            y2={padding.top + chartHeight}
+            stroke="currentColor"
+            strokeOpacity="0.18"
+          />
+
+          {path && (
+            <path
+              d={path}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="text-primary"
+            />
+          )}
+
+          {points.map((point) => (
+            <g key={point.entry.id}>
+              <circle
+                cx={point.x}
+                cy={point.y}
+                r="6"
+                className="fill-background stroke-primary"
+                strokeWidth="3"
+              />
+
+              <text
+                x={point.x}
+                y={point.y - 13}
+                textAnchor="middle"
+                className="fill-foreground text-[11px] font-medium"
+              >
+                {formatSeverity(point.severity)}
+              </text>
+
+              <text
+                x={point.x}
+                y={height - 20}
+                textAnchor="middle"
+                className="fill-muted-foreground text-[10px]"
+              >
+                {formatGraphDate(
+                  point.entry.date,
+                )}
+              </text>
+            </g>
+          ))}
+        </svg>
       </div>
-    </main>
+    </div>
   );
+}
+
+/**
+ * ---------------------------------------------------------
+ * HELPERS
+ * ---------------------------------------------------------
+ */
+function clampSeverity(value: number) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(10, value));
+}
+
+function formatSeverity(value: number) {
+  const safe = clampSeverity(value);
+
+  return Number.isInteger(safe)
+    ? String(safe)
+    : safe.toFixed(1);
+}
+
+function formatDate(date: string) {
+  const parsed = new Date(date);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return date;
+  }
+
+  return parsed.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function formatGraphDate(date: string) {
+  const parsed = new Date(date);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  return parsed.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+  });
 }
