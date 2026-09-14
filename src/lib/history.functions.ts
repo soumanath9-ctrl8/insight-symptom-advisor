@@ -169,6 +169,19 @@ const PatientIdSchema =
 
 export type HistoryCheck = {
   id: string;
+  createdAt: string;
+  symptoms: string;
+  severity: number;
+  healthTrendScore: number | null;
+  urgency: Urgency;
+  topCondition: string;
+  summary: string;
+  subjectType: HistorySubjectType;
+  patientId: string | null;
+};
+
+export type HistoryCheck = {
+  id: string;
 
   date: string;
 
