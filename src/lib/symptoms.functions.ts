@@ -3,11 +3,13 @@ import { streamText } from "ai";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+
 import {
   detectRedFlags,
   redFlagUrgencyNotice,
   type RedFlagResult,
 } from "./red-flags";
+
 import {
   KNOWLEDGE_PROVENANCE,
   QUESTION_TEMPLATES,
@@ -15,7 +17,9 @@ import {
   ageGuidance,
   pregnancyGuidance,
 } from "./medical-knowledge";
+
 import { validateAssessment } from "./safety-validator";
+
 import {
   describeVitals,
   extractVitals,
@@ -63,8 +67,11 @@ const AssessmentInput = ContextInput.extend({
 /**
  * Patient checker has a completely separate input contract.
  *
- * The browser sends only patientId.
- * The server verifies ownership and retrieves the actual profile.
+ * Browser sends patientId.
+ * Server verifies ownership and loads the actual profile.
+ *
+ * IMPORTANT:
+ * Patient profile is intentionally NOT accepted from the browser.
  */
 const PatientAssessmentInput = z.object({
   patientId: z.string().uuid(),
@@ -117,15 +124,28 @@ const FactorSchema = z.object({
 
 const ConditionSchema = z.object({
   name: z.string(),
+
   riskLevel: z.string(),
+
   likelihood: z.number(),
+
   explanation: z.string(),
+
   riskRationale: z.string(),
+
   matchingSymptoms: z.array(z.string()).default([]),
-  contributingFactors: z.array(FactorSchema).default([]),
+
+  contributingFactors: z
+    .array(FactorSchema)
+    .default([]),
+
   nextSteps: z.string(),
+
   selfCare: z.array(z.string()).default([]),
-  reliefCategories: z.array(z.string()).default([]),
+
+  reliefCategories: z
+    .array(z.string())
+    .default([]),
 });
 
 const AssessmentSchema = z.object({
@@ -154,17 +174,29 @@ const ClarificationSchema = z.object({
   clarification: z
     .object({
       question: z.string(),
+
       why: z.string().optional().default(""),
-      options: z.array(z.string()).optional().default([]),
+
+      options: z
+        .array(z.string())
+        .optional()
+        .default([]),
     })
     .nullable(),
 });
 
-type RawAssessment = z.infer<typeof AssessmentSchema>;
+type RawAssessment =
+  z.infer<typeof AssessmentSchema>;
 
-export type RiskLevel = "low" | "moderate" | "high";
+export type RiskLevel =
+  | "low"
+  | "moderate"
+  | "high";
 
-export type Confidence = "low" | "moderate" | "high";
+export type Confidence =
+  | "low"
+  | "moderate"
+  | "high";
 
 export type Urgency =
   | "self-care"
@@ -173,30 +205,39 @@ export type Urgency =
   | "emergency";
 
 export type FollowUpQuestion =
-  z.infer<typeof QuestionsSchema>["questions"][number];
+  z.infer<
+    typeof QuestionsSchema
+  >["questions"][number];
 
-export type Condition = Omit<
-  RawAssessment["conditions"][number],
-  "riskLevel"
-> & {
-  riskLevel: RiskLevel;
-};
+export type Condition =
+  Omit<
+    RawAssessment["conditions"][number],
+    "riskLevel"
+  > & {
+    riskLevel: RiskLevel;
+  };
 
-export type Assessment = Omit<
-  RawAssessment,
-  "urgency" | "conditions" | "confidence"
-> & {
-  urgency: Urgency;
-  confidence: Confidence;
-  conditions: Condition[];
-  selfCare: string[];
-};
+export type Assessment =
+  Omit<
+    RawAssessment,
+    "urgency" | "conditions" | "confidence"
+  > & {
+    urgency: Urgency;
+
+    confidence: Confidence;
+
+    conditions: Condition[];
+
+    selfCare: string[];
+  };
 
 /* -------------------------------------------------------------------------- */
 /*                              Normalizers                                    */
 /* -------------------------------------------------------------------------- */
 
-function normalizeConfidence(value: string): Confidence {
+function normalizeConfidence(
+  value: string,
+): Confidence {
   const v = value.toLowerCase();
 
   if (
@@ -216,7 +257,9 @@ function normalizeConfidence(value: string): Confidence {
   return "moderate";
 }
 
-function normalizeRisk(value: string): RiskLevel {
+function normalizeRisk(
+  value: string,
+): RiskLevel {
   const v = value.toLowerCase();
 
   if (
@@ -241,12 +284,17 @@ function normalizeRisk(value: string): RiskLevel {
   return "low";
 }
 
-function normalizeUrgency(value: string): Urgency {
+function normalizeUrgency(
+  value: string,
+): Urgency {
   const v = value.toLowerCase();
 
   /*
    * IMPORTANT:
-   * Emergency must be checked before urgent.
+   * Emergency must be checked BEFORE urgent.
+   *
+   * "জরুরি অবস্থা" contains "জরুরি",
+   * so emergency must win.
    */
   if (
     v.includes("emerg") ||
@@ -284,7 +332,9 @@ function normalizeUrgency(value: string): Urgency {
   return "self-care";
 }
 
-function langLine(language: "en" | "bn") {
+function langLine(
+  language: "en" | "bn",
+) {
   return language === "bn"
     ? "Write every user-visible string in natural Bengali (বাংলা). JSON keys stay in English."
     : "Write every user-visible string in plain English.";
@@ -300,31 +350,33 @@ type SafetyInput = {
   answers?: {
     question: string;
     answer: string;
-  }[] | undefined;
+  }[];
 
-  age?: string | undefined;
+  age?: string;
 
-  duration?: string | undefined;
+  duration?: string;
 
-  severity?: number | undefined;
+  severity?: number;
 
-  language?: "en" | "bn" | undefined;
+  language?: "en" | "bn";
 };
 
 /**
- * Build text that is strictly based on information actually reported
+ * Build text strictly from information actually reported
  * by the patient/user.
  *
- * Question wording is NEVER included.
+ * QUESTION TEXT IS NEVER INCLUDED.
  */
 function patientReportedText(
   input: SafetyInput,
 ): string {
   return [
     input.symptoms,
+
     input.duration ?? "",
+
     ...(input.answers ?? []).map(
-      (answer) => answer.answer,
+      (item) => item.answer,
     ),
   ]
     .filter(
@@ -342,74 +394,110 @@ function patientReportedText(
 /**
  * Deterministic safety layer.
  *
- * This layer is authoritative for red-flag triage.
+ * This layer is authoritative for immediate
+ * red-flag triage.
  *
- * Important:
- * - red flags use reported symptoms + answer text
- * - question text is deliberately discarded
- * - vitals come only from patient-reported text
+ * Safety evidence comes only from:
+ *
+ * - initial symptom description
+ * - duration
+ * - patient answers
+ * - patient-reported vitals contained in that text
+ *
+ * Question wording is NEVER used as evidence.
  */
 export function safetyScreen(
   input: SafetyInput,
-): RedFlagResult & { vitals: Vitals } {
+): RedFlagResult & {
+  vitals: Vitals;
+} {
   const lang =
     input.language === "bn"
       ? "bn"
       : "en";
 
-  const reportedAnswers = (
-    input.answers ?? []
-  ).map((answer) => ({
-    /*
-     * Do not pass the actual question to the safety
-     * detector. This prevents question wording from
-     * being interpreted as a patient symptom.
-     */
-    question: "",
-    answer: answer.answer,
-  }));
+  /*
+   * IMPORTANT:
+   *
+   * red-flags.ts may accept question fields for
+   * compatibility, but we deliberately blank them.
+   *
+   * Therefore the detector cannot accidentally
+   * interpret:
+   *
+   * "Do you have chest pain?"
+   *
+   * as:
+   *
+   * "The patient has chest pain."
+   */
+  const reportedAnswers =
+    (input.answers ?? []).map(
+      (answer) => ({
+        question: "",
+        answer: answer.answer,
+      }),
+    );
 
-  const base = detectRedFlags({
-    symptoms: input.symptoms,
+  const base =
+    detectRedFlags({
+      symptoms:
+        input.symptoms,
 
-    answers: reportedAnswers,
+      answers:
+        reportedAnswers,
 
-    ...(input.age !== undefined
-      ? {
-          age: input.age,
-        }
-      : {}),
+      ...(input.age !==
+      undefined
+        ? {
+            age: input.age,
+          }
+        : {}),
 
-    ...(input.duration !== undefined
-      ? {
-          duration: input.duration,
-        }
-      : {}),
+      ...(input.duration !==
+      undefined
+        ? {
+            duration:
+              input.duration,
+          }
+        : {}),
 
-    ...(input.language !== undefined
-      ? {
-          language: input.language,
-        }
-      : {}),
-  });
+      ...(input.language !==
+      undefined
+        ? {
+            language:
+              input.language,
+          }
+        : {}),
+    });
 
   /*
-   * Vital extraction is strictly restricted to
-   * patient-reported text.
+   * VITALS MUST COME ONLY FROM PATIENT-REPORTED TEXT.
+   *
+   * No question text.
+   * No AI-generated content.
+   * No profile background.
    */
   const reportedText =
     patientReportedText(input);
 
   const vitals =
-    extractVitals(reportedText);
+    extractVitals(
+      reportedText,
+    );
 
-  const vitalHits = flagVitals(
-    vitals,
-  ).map((finding, index) => ({
-    id: `vital-${index}`,
-    severity: finding.severity,
-    message: finding.message[lang],
-  }));
+  const vitalHits =
+    flagVitals(vitals).map(
+      (finding, index) => ({
+        id: `vital-${index}`,
+
+        severity:
+          finding.severity,
+
+        message:
+          finding.message[lang],
+      }),
+    );
 
   const hits = [
     ...base.hits,
@@ -417,20 +505,26 @@ export function safetyScreen(
   ];
 
   /*
-   * Critical has absolute priority.
-   * Urgent is distinct from emergency.
+   * Critical always wins over urgent.
+   *
+   * critical -> immediate emergency
+   * urgent   -> prompt medical assessment
+   * none     -> no deterministic escalation
    */
-  const level = hits.some(
-    (hit) =>
-      hit.severity === "critical",
-  )
-    ? ("critical" as const)
-    : hits.some(
-          (hit) =>
-            hit.severity === "urgent",
-        )
-      ? ("urgent" as const)
-      : null;
+  const level =
+    hits.some(
+      (hit) =>
+        hit.severity ===
+        "critical",
+    )
+      ? ("critical" as const)
+      : hits.some(
+            (hit) =>
+              hit.severity ===
+              "urgent",
+          )
+        ? ("urgent" as const)
+        : null;
 
   return {
     hits,
@@ -449,7 +543,10 @@ export function immediateEmergencyAssessment(
   const check =
     safetyScreen(input);
 
-  if (check.level !== "critical") {
+  if (
+    check.level !==
+    "critical"
+  ) {
     return null;
   }
 
@@ -470,23 +567,30 @@ export function immediateEmergencyAssessment(
         ? "আপনার বর্ণনায় সম্ভাব্য জীবনসংশয়ী সতর্ক-সংকেত পাওয়া গেছে। কোনো সম্ভাব্য রোগের অনুমান না করে সরাসরি আপৎকালীন পরামর্শ দেখানো হচ্ছে।"
         : "Your description contains possible life-threatening warning signs, so emergency guidance is shown straight away instead of a condition prediction.",
 
-    urgency: "emergency",
+    urgency:
+      "emergency",
 
-    urgencyReason: notice,
+    urgencyReason:
+      notice,
 
     conditions: [],
 
-    redFlags: check.hits
-      .map((hit) => hit.message)
-      .filter(Boolean)
-      .slice(0, 10),
+    redFlags:
+      check.hits
+        .map(
+          (hit) =>
+            hit.message,
+        )
+        .filter(Boolean)
+        .slice(0, 10),
 
     generalAdvice:
       lang === "bn"
         ? "এখনই ১১২ বা ১০৮-এ কল করুন অথবা নিকটতম আপৎকালীন বিভাগে যান। রোগীকে একা রাখবেন না।"
         : "Call 112 or 108 now, or go to the nearest emergency department. Do not leave the person alone.",
 
-    confidence: "high",
+    confidence:
+      "high",
 
     confidenceNote:
       lang === "bn"
@@ -513,7 +617,9 @@ async function callModel(
   prompt: string,
 ) {
   const key =
-    process.env["LOVABLE_API_KEY"];
+    process.env[
+      "LOVABLE_API_KEY"
+    ];
 
   if (!key) {
     throw new Error(
@@ -533,13 +639,16 @@ async function callModel(
       key,
     );
 
-  const result = streamText({
-    model: gateway(
-      "google/gemini-3.7-flash",
-    ),
-    system,
-    prompt,
-  });
+  const result =
+    streamText({
+      model: gateway(
+        "google/gemini-3.7-flash",
+      ),
+
+      system,
+
+      prompt,
+    });
 
   const text =
     await result.text;
@@ -597,7 +706,8 @@ function contextBlock(
       ? `Duration: ${data.duration}`
       : "",
 
-    data.severity !== undefined
+    data.severity !==
+    undefined
       ? `Self-rated overall severity: ${data.severity}/10`
       : "",
   ]
@@ -611,13 +721,17 @@ function contextBlock(
 
 type PatientProfileRow = {
   id: string;
+
   owner_user_id: string;
 
   name: string | null;
+
   age: string | null;
+
   sex: string | null;
 
   allergies: string | null;
+
   existing_conditions:
     | string
     | null;
@@ -649,12 +763,19 @@ async function getOwnedPatientProfile(
       table: string,
     ) => any;
   },
+
   userId: string,
+
   patientId: string,
 ): Promise<PatientProfileRow> {
-  const { data, error } =
+  const {
+    data,
+    error,
+  } =
     await supabase
-      .from("patient_profiles")
+      .from(
+        "patient_profiles",
+      )
       .select(
         [
           "id",
@@ -715,20 +836,29 @@ function buildPatientProfileContext(
       : "Not provided";
 
   const isFemale =
-    profile.sex?.trim()
+    profile.sex
+      ?.trim()
       .toLowerCase() ===
     "female";
 
   return [
     "PATIENT PROFILE CONTEXT:",
 
-    `Patient name: ${value(profile.name)}`,
+    `Patient name: ${value(
+      profile.name,
+    )}`,
 
-    `Age: ${value(profile.age)}`,
+    `Age: ${value(
+      profile.age,
+    )}`,
 
-    `Sex: ${value(profile.sex)}`,
+    `Sex: ${value(
+      profile.sex,
+    )}`,
 
-    `Allergies: ${value(profile.allergies)}`,
+    `Allergies: ${value(
+      profile.allergies,
+    )}`,
 
     `Existing conditions: ${value(
       profile.existing_conditions,
@@ -768,6 +898,9 @@ export const getFollowUpQuestions =
   createServerFn({
     method: "POST",
   })
+    .middleware([
+      requireSupabaseAuth,
+    ])
     .inputValidator(
       (input: unknown) =>
         ContextInput.parse(
@@ -775,7 +908,9 @@ export const getFollowUpQuestions =
         ),
     )
     .handler(
-      async ({ data }) => {
+      async ({
+        data,
+      }) => {
         const raw =
           await callModel(
             [
@@ -784,6 +919,8 @@ export const getFollowUpQuestions =
               "Ask 2-4 short, specific follow-up questions that would most change your thinking about THIS presentation.",
 
               "Every question MUST target the problem actually reported.",
+
+              "Do not interpret question wording as evidence that the patient has a symptom.",
 
               "Worked examples:",
 
@@ -825,7 +962,10 @@ export const getFollowUpQuestions =
             ]
               .filter(Boolean)
               .join(" "),
-            contextBlock(data),
+
+            contextBlock(
+              data,
+            ),
           );
 
         return QuestionsSchema.parse(
@@ -877,22 +1017,25 @@ export const getPatientFollowUpQuestions =
             profile,
           );
 
-        const baseContext = [
-          `Initial symptom description: ${data.symptoms}`,
+        const baseContext =
+          [
+            `Initial symptom description: ${data.symptoms}`,
 
-          data.duration
-            ? `Duration: ${data.duration}`
-            : "",
+            data.duration
+              ? `Duration: ${data.duration}`
+              : "",
 
-          data.severity !==
-          undefined
-            ? `Self-rated overall severity: ${data.severity}/10`
-            : "",
+            data.severity !==
+            undefined
+              ? `Self-rated overall severity: ${data.severity}/10`
+              : "",
 
-          profileContext,
-        ]
-          .filter(Boolean)
-          .join("\n\n");
+            profileContext,
+          ]
+            .filter(Boolean)
+            .join(
+              "\n\n",
+            );
 
         const raw =
           await callModel(
@@ -937,6 +1080,7 @@ export const getPatientFollowUpQuestions =
             ]
               .filter(Boolean)
               .join(" "),
+
             baseContext,
           );
 
@@ -965,13 +1109,15 @@ const WORSENING = [
  */
 function isWorsening(
   symptoms: string,
+
   answers: {
     question: string;
     answer: string;
   }[],
-) {
+): boolean {
   const text = [
     symptoms,
+
     ...answers.map(
       (answer) =>
         answer.answer,
@@ -988,23 +1134,25 @@ function isWorsening(
 /*                          Shared assessment prompt                            */
 /* -------------------------------------------------------------------------- */
 
-function assessmentSystemPrompt(args: {
-  language: "en" | "bn";
+function assessmentSystemPrompt(
+  args: {
+    language: "en" | "bn";
 
-  age?: string;
+    age?: string;
 
-  sex?: string;
+    sex?: string;
 
-  pregnancy?: string;
+    pregnancy?: string;
 
-  redFlagCheck: ReturnType<
-    typeof safetyScreen
-  >;
+    redFlagCheck: ReturnType<
+      typeof safetyScreen
+    >;
 
-  worseningOverride: boolean;
+    worseningOverride: boolean;
 
-  profileContext?: string;
-}) {
+    profileContext?: string;
+  },
+) {
   const {
     language,
     age,
@@ -1100,6 +1248,7 @@ function assessmentSystemPrompt(args: {
 
     [
       "PATIENT-REPORTED VITALS:",
+
       describeVitals(
         redFlagCheck.vitals,
       ),
@@ -1157,12 +1306,15 @@ function assessmentSystemPrompt(args: {
 
     "The likelihood values do not need to sum to 100.",
 
-    langLine(language),
+    langLine(
+      language,
+    ),
 
     "Required JSON shape:",
 
     JSON.stringify({
-      summary: "string",
+      summary:
+        "string",
 
       urgency:
         "self-care | see-a-doctor | urgent | emergency",
@@ -1179,7 +1331,8 @@ function assessmentSystemPrompt(args: {
 
           likelihood: 0,
 
-          explanation: "string",
+          explanation:
+            "string",
 
           riskRationale:
             "string",
@@ -1190,13 +1343,18 @@ function assessmentSystemPrompt(args: {
 
           contributingFactors: [
             {
-              factor: "string",
+              factor:
+                "string",
+
               weight: 0,
-              effect: "string",
+
+              effect:
+                "string",
             },
           ],
 
-          nextSteps: "string",
+          nextSteps:
+            "string",
 
           selfCare: [
             "string",
@@ -1255,12 +1413,16 @@ function assessmentContext(
       .join("\n");
 
   return [
-    contextBlock(data),
+    contextBlock(
+      data,
+    ),
 
     answers
       ? `FOLLOW-UP ANSWERS:\n${answers}`
       : "FOLLOW-UP ANSWERS: None.",
-  ].join("\n\n");
+  ].join(
+    "\n\n",
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1271,6 +1433,7 @@ function patientAssessmentContext(
   data: z.infer<
     typeof PatientAssessmentInput
   >,
+
   profile: PatientProfileRow,
 ) {
   const answers =
@@ -1294,7 +1457,8 @@ function patientAssessmentContext(
       ? `Duration: ${data.duration}`
       : "",
 
-    data.severity !== undefined
+    data.severity !==
+    undefined
       ? `Overall reported severity: ${data.severity}/10`
       : "",
 
@@ -1318,6 +1482,7 @@ function patientAssessmentContext(
 
 function normalizeAssessment(
   raw: unknown,
+
   language: "en" | "bn",
 ): Assessment {
   const parsed =
@@ -1328,65 +1493,68 @@ function normalizeAssessment(
   const conditions: Condition[] =
     parsed.conditions
       .slice(0, 5)
-      .map((condition) => ({
-        ...condition,
+      .map(
+        (condition) => ({
+          ...condition,
 
-        riskLevel:
-          normalizeRisk(
-            condition.riskLevel,
-          ),
-
-        likelihood: Math.max(
-          0,
-          Math.min(
-            100,
-            Math.round(
-              Number.isFinite(
-                condition.likelihood,
-              )
-                ? condition.likelihood
-                : 0,
+          riskLevel:
+            normalizeRisk(
+              condition.riskLevel,
             ),
-          ),
-        ),
 
-        matchingSymptoms:
-          condition.matchingSymptoms
-            .filter(Boolean)
-            .slice(0, 8),
+          likelihood:
+            Math.max(
+              0,
+              Math.min(
+                100,
+                Math.round(
+                  Number.isFinite(
+                    condition.likelihood,
+                  )
+                    ? condition.likelihood
+                    : 0,
+                ),
+              ),
+            ),
 
-        contributingFactors:
-          condition.contributingFactors
-            .slice(0, 8)
-            .map(
-              (factor) => ({
-                ...factor,
+          matchingSymptoms:
+            condition.matchingSymptoms
+              .filter(Boolean)
+              .slice(0, 8),
 
-                weight:
-                  Math.max(
-                    -100,
-                    Math.min(
-                      100,
-                      Number.isFinite(
-                        factor.weight,
-                      )
-                        ? factor.weight
-                        : 0,
+          contributingFactors:
+            condition.contributingFactors
+              .slice(0, 8)
+              .map(
+                (factor) => ({
+                  ...factor,
+
+                  weight:
+                    Math.max(
+                      -100,
+                      Math.min(
+                        100,
+                        Number.isFinite(
+                          factor.weight,
+                        )
+                          ? factor.weight
+                          : 0,
+                      ),
                     ),
-                  ),
-              }),
-            ),
+                }),
+              ),
 
-        selfCare:
-          condition.selfCare
-            .filter(Boolean)
-            .slice(0, 8),
+          selfCare:
+            condition.selfCare
+              .filter(Boolean)
+              .slice(0, 8),
 
-        reliefCategories:
-          condition.reliefCategories
-            .filter(Boolean)
-            .slice(0, 8),
-      }));
+          reliefCategories:
+            condition.reliefCategories
+              .filter(Boolean)
+              .slice(0, 8),
+        }),
+      );
 
   const urgency =
     normalizeUrgency(
@@ -1487,6 +1655,7 @@ function urgencyRank(
 
 function maxUrgency(
   a: Urgency,
+
   b: Urgency,
 ): Urgency {
   return urgencyRank(a) >=
@@ -1496,12 +1665,8 @@ function maxUrgency(
 }
 
 /**
- * Convert deterministic safety level to the minimum
- * urgency that the AI is allowed to return.
- *
- * critical -> emergency
- * urgent   -> urgent
- * none     -> self-care floor
+ * Convert deterministic safety level to
+ * minimum allowed urgency.
  */
 function safetyMinimumUrgency(
   level:
@@ -1509,11 +1674,17 @@ function safetyMinimumUrgency(
     | "urgent"
     | null,
 ): Urgency {
-  if (level === "critical") {
+  if (
+    level ===
+    "critical"
+  ) {
     return "emergency";
   }
 
-  if (level === "urgent") {
+  if (
+    level ===
+    "urgent"
+  ) {
     return "urgent";
   }
 
@@ -1527,9 +1698,6 @@ function safetyMinimumUrgency(
 /**
  * Final safety gate.
  *
- * This is deliberately stronger than allowing the AI to decide urgency
- * independently.
- *
  * Rules:
  *
  * critical -> emergency
@@ -1538,9 +1706,11 @@ function safetyMinimumUrgency(
  */
 function applySafetyOverride(
   assessment: Assessment,
+
   safety: ReturnType<
     typeof safetyScreen
   >,
+
   language: "en" | "bn",
 ): Assessment {
   const minimumUrgency =
@@ -1549,8 +1719,9 @@ function applySafetyOverride(
     );
 
   /*
-   * Critical safety finding:
-   * absolute emergency override.
+   * CRITICAL:
+   *
+   * Absolute emergency override.
    */
   if (
     safety.level ===
@@ -1562,6 +1733,13 @@ function applySafetyOverride(
         language,
       );
 
+    /*
+     * Deterministic findings are placed FIRST.
+     *
+     * AI-generated red flags are retained only
+     * as additional context; they can never
+     * downgrade or override deterministic triage.
+     */
     return {
       ...assessment,
 
@@ -1605,10 +1783,15 @@ function applySafetyOverride(
   }
 
   /*
-   * Urgent deterministic finding:
+   * URGENT:
    *
-   * AI may say urgent or emergency,
-   * but NEVER self-care / routine doctor review.
+   * AI may say:
+   * - urgent
+   * - emergency
+   *
+   * But it may NOT downgrade the case to:
+   * - self-care
+   * - routine doctor review
    */
   if (
     safety.level ===
@@ -1653,14 +1836,15 @@ function applySafetyOverride(
   }
 
   /*
-   * No deterministic critical/urgent finding:
-   * preserve AI urgency.
+   * NO deterministic escalation.
+   *
+   * AI urgency is preserved.
    */
   return assessment;
 }
 
 /* -------------------------------------------------------------------------- */
-/*                         Self symptom assessment                            */
+/*                         Self symptom assessment                             */
 /* -------------------------------------------------------------------------- */
 
 export const assessSymptoms =
@@ -1677,7 +1861,9 @@ export const assessSymptoms =
         ),
     )
     .handler(
-      async ({ data }) => {
+      async ({
+        data,
+      }) => {
         const safetyInput: SafetyInput =
           {
             symptoms:
@@ -1720,7 +1906,9 @@ export const assessSymptoms =
           );
 
         /*
-         * Critical cases bypass the AI differential entirely.
+         * CRITICAL CASE:
+         *
+         * Never send to AI differential.
          */
         if (
           safety.level ===
@@ -1770,6 +1958,7 @@ export const assessSymptoms =
         const raw =
           await callModel(
             system,
+
             assessmentContext(
               data,
             ),
@@ -1781,6 +1970,10 @@ export const assessSymptoms =
             data.language,
           );
 
+        /*
+         * Deterministic safety ALWAYS comes
+         * after AI normalization.
+         */
         assessment =
           applySafetyOverride(
             assessment,
@@ -1789,21 +1982,15 @@ export const assessSymptoms =
           );
 
         /*
-         * Validate the final normalized assessment
-         * after deterministic safety has been applied.
+         * Validate the normalized result.
          *
-         * The validator must never be allowed to remove
-         * the deterministic safety decision.
+         * The validator is advisory/structural here.
+         * It must NOT be allowed to remove the
+         * deterministic safety override.
          */
-        const validated =
-          validateAssessment(
-            assessment,
-          );
-
-        assessment =
-          validated
-            ? assessment
-            : assessment;
+        validateAssessment(
+          assessment,
+        );
 
         return assessment;
       },
@@ -1842,8 +2029,14 @@ export const assessPatientSymptoms =
 
         /*
          * SECURITY:
-         * Patient ID is verified against the authenticated
-         * owner's ID before profile data is used.
+         *
+         * Browser cannot provide the profile.
+         *
+         * The server:
+         *
+         * 1. authenticates the user
+         * 2. verifies patient ownership
+         * 3. retrieves the profile
          */
         const profile =
           await getOwnedPatientProfile(
@@ -1881,8 +2074,10 @@ export const assessPatientSymptoms =
 
             /*
              * Age may influence deterministic
-             * rules, but profile background itself
-             * is not passed as symptoms.
+             * rules.
+             *
+             * Other profile fields are NOT
+             * passed into safety detection.
              */
             ...(profile.age !==
             null
@@ -1899,7 +2094,9 @@ export const assessPatientSymptoms =
           );
 
         /*
-         * Critical patient cases bypass the AI differential.
+         * CRITICAL PATIENT CASE:
+         *
+         * Bypass AI differential.
          */
         if (
           safety.level ===
@@ -1949,6 +2146,10 @@ export const assessPatientSymptoms =
                   }
                 : {}),
 
+              /*
+               * Pregnancy context is included
+               * only for female patients.
+               */
               ...(profile.sex
                 ?.trim()
                 .toLowerCase() ===
@@ -1986,15 +2187,9 @@ export const assessPatientSymptoms =
             data.language,
           );
 
-        const validated =
-          validateAssessment(
-            assessment,
-          );
-
-        assessment =
-          validated
-            ? assessment
-            : assessment;
+        validateAssessment(
+          assessment,
+        );
 
         return assessment;
       },
@@ -2018,7 +2213,9 @@ export const clarifyAnswers =
         ),
     )
     .handler(
-      async ({ data }) => {
+      async ({
+        data,
+      }) => {
         const safetyInput: SafetyInput =
           {
             symptoms:
@@ -2061,7 +2258,8 @@ export const clarifyAnswers =
           );
 
         /*
-         * Never delay a critical case for clarification.
+         * Never delay a critical case
+         * for clarification.
          */
         if (
           safety.level ===
@@ -2082,6 +2280,8 @@ export const clarifyAnswers =
               "Return null when no clarification is essential.",
 
               "Never use the wording of a question as evidence that the patient has a symptom.",
+
+              "Use only patient-reported answers as evidence.",
 
               langLine(
                 data.language,
@@ -2131,6 +2331,7 @@ function meaningfulComplaintWords(
       "aches",
       "hurt",
       "hurts",
+
       "ব্যথা",
       "সমস্যা",
       "উপসর্গ",
@@ -2145,8 +2346,9 @@ function meaningfulComplaintWords(
         " ",
       )
       .split(/\s+/)
-      .map((word) =>
-        word.trim(),
+      .map(
+        (word) =>
+          word.trim(),
       )
       .filter(
         (word) =>
@@ -2161,22 +2363,24 @@ function meaningfulComplaintWords(
 /**
  * Complaint-aware carry-over.
  *
- * A previous symptom history should not influence a completely
- * unrelated complaint.
+ * A previous symptom history should not influence
+ * a completely unrelated complaint.
  *
- * Generic words such as "pain" are deliberately ignored.
+ * Generic words such as "pain" are ignored.
  */
 export function hasComplaintCarryover(
   currentSymptoms: string,
+
   previousSymptoms: string[],
-) {
+): boolean {
   const currentWords =
     meaningfulComplaintWords(
       currentSymptoms,
     );
 
   if (
-    currentWords.size === 0
+    currentWords.size ===
+    0
   ) {
     return false;
   }
@@ -2196,7 +2400,9 @@ export function hasComplaintCarryover(
       }
 
       const overlap =
-        [...previousWords].filter(
+        [
+          ...previousWords,
+        ].filter(
           (word) =>
             currentWords.has(
               word,
@@ -2204,10 +2410,10 @@ export function hasComplaintCarryover(
         ).length;
 
       /*
-       * Require at least two meaningful overlapping
-       * terms to carry history forward.
+       * Require at least two meaningful
+       * overlapping terms.
        *
-       * This prevents a generic single word from
+       * This prevents generic words from
        * linking unrelated complaints.
        */
       return overlap >= 2;
@@ -2230,13 +2436,15 @@ export function hasComplaintCarryover(
  * - clinical risk percentage
  * - medically validated health score
  *
- * It is a consistent 0-100 longitudinal trend indicator
- * based only on information reported during a symptom check.
+ * It is a consistent 0-100 longitudinal
+ * trend indicator based only on information
+ * reported during a symptom check.
  *
  * Higher score = better reported condition.
  * Lower score  = worse reported condition.
  *
- * It is intentionally separate from condition.likelihood.
+ * It is completely separate from
+ * condition.likelihood.
  *
  * condition.likelihood:
  *     0-100 Symptom Match Strength
@@ -2245,9 +2453,6 @@ export function hasComplaintCarryover(
  *     0-100 Reported Health Condition Trend
  */
 
-/**
- * Keep urgent and emergency distinct.
- */
 export type HealthTrendUrgency =
   | "self-care"
   | "see-a-doctor"
@@ -2265,7 +2470,7 @@ export type HealthTrendInput = {
 };
 
 /**
- * Converts self-reported symptom severity to a baseline.
+ * Converts self-reported severity to baseline.
  *
  * 1  -> 92
  * 2  -> 84
@@ -2339,7 +2544,7 @@ function urgencyPenalty(
 /**
  * Red-flag penalty.
  *
- * Maximum penalty is capped.
+ * Maximum penalty = 30.
  */
 function redFlagPenalty(
   redFlagCount: number,
@@ -2365,8 +2570,8 @@ function redFlagPenalty(
 /**
  * Modest worsening penalty.
  *
- * Worsening alone never automatically means
- * urgent/emergency.
+ * Worsening alone NEVER automatically
+ * means urgent/emergency.
  */
 function worseningPenalty(
   worsening: boolean,
@@ -2387,7 +2592,7 @@ function worseningPenalty(
  * Check 1 -> 70
  * Check 2 -> 60
  *
- * The graph moves DOWN.
+ * Graph moves DOWN.
  */
 export function calculateHealthTrendScore(
   input: HealthTrendInput,
@@ -2416,7 +2621,9 @@ export function calculateHealthTrendScore(
     0,
     Math.min(
       100,
-      Math.round(score),
+      Math.round(
+        score,
+      ),
     ),
   );
 }
@@ -2424,14 +2631,15 @@ export function calculateHealthTrendScore(
 /**
  * Convenience helper.
  *
- * The caller supplies:
+ * Caller supplies:
+ *
  * - final assessment urgency
  * - deterministic safety result
  * - patient-reported severity
  * - patient-reported worsening
  *
- * Question text and background profile data are not
- * used to calculate the trend score.
+ * Question text and profile background
+ * are not used to calculate the score.
  */
 export function calculateHealthTrendFromAssessment(
   input: {
