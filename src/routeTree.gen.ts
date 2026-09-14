@@ -19,6 +19,7 @@ import { Route as AuthenticatedHomeRouteImport } from './routes/_authenticated/h
 import { Route as AuthenticatedPatientsRouteImport } from './routes/_authenticated/patients'
 import { Route as AuthenticatedProfileRouteImport } from './routes/_authenticated/profile'
 import { Route as AuthenticatedPatientCheckerPatient_IDRouteImport } from './routes/_authenticated/patient-checker/$patient_ID'
+import { Route as AuthenticatedPatientHistoryPatient_IDRouteImport } from './routes/_authenticated/patient-history/$patient_ID'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -70,6 +71,12 @@ const AuthenticatedPatientCheckerPatient_IDRoute =
     path: '/patient-checker/$patient_ID',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedPatientHistoryPatient_IDRoute =
+  AuthenticatedPatientHistoryPatient_IDRouteImport.update({
+    id: '/patient-history/$patient_ID',
+    path: '/patient-history/$patient_ID',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -81,6 +88,7 @@ export interface FileRoutesByFullPath {
   '/patients': typeof AuthenticatedPatientsRoute
   '/profile': typeof AuthenticatedProfileRoute
   '/patient-checker/$patient_ID': typeof AuthenticatedPatientCheckerPatient_IDRoute
+  '/patient-history/$patient_ID': typeof AuthenticatedPatientHistoryPatient_IDRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -92,6 +100,7 @@ export interface FileRoutesByTo {
   '/patients': typeof AuthenticatedPatientsRoute
   '/profile': typeof AuthenticatedProfileRoute
   '/patient-checker/$patient_ID': typeof AuthenticatedPatientCheckerPatient_IDRoute
+  '/patient-history/$patient_ID': typeof AuthenticatedPatientHistoryPatient_IDRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -105,6 +114,7 @@ export interface FileRoutesById {
   '/_authenticated/patients': typeof AuthenticatedPatientsRoute
   '/_authenticated/profile': typeof AuthenticatedProfileRoute
   '/_authenticated/patient-checker/$patient_ID': typeof AuthenticatedPatientCheckerPatient_IDRoute
+  '/_authenticated/patient-history/$patient_ID': typeof AuthenticatedPatientHistoryPatient_IDRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -118,6 +128,7 @@ export interface FileRouteTypes {
     | '/patients'
     | '/profile'
     | '/patient-checker/$patient_ID'
+    | '/patient-history/$patient_ID'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -129,6 +140,7 @@ export interface FileRouteTypes {
     | '/patients'
     | '/profile'
     | '/patient-checker/$patient_ID'
+    | '/patient-history/$patient_ID'
   id:
     | '__root__'
     | '/'
@@ -141,6 +153,7 @@ export interface FileRouteTypes {
     | '/_authenticated/patients'
     | '/_authenticated/profile'
     | '/_authenticated/patient-checker/$patient_ID'
+    | '/_authenticated/patient-history/$patient_ID'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -221,6 +234,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedPatientCheckerPatient_IDRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/patient-history/$patient_ID': {
+      id: '/_authenticated/patient-history/$patient_ID'
+      path: '/patient-history/$patient_ID'
+      fullPath: '/patient-history/$patient_ID'
+      preLoaderRoute: typeof AuthenticatedPatientHistoryPatient_IDRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
   }
 }
 
@@ -232,6 +252,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedPatientsRoute: typeof AuthenticatedPatientsRoute
   AuthenticatedProfileRoute: typeof AuthenticatedProfileRoute
   AuthenticatedPatientCheckerPatient_IDRoute: typeof AuthenticatedPatientCheckerPatient_IDRoute
+  AuthenticatedPatientHistoryPatient_IDRoute: typeof AuthenticatedPatientHistoryPatient_IDRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
@@ -243,6 +264,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedProfileRoute: AuthenticatedProfileRoute,
   AuthenticatedPatientCheckerPatient_IDRoute:
     AuthenticatedPatientCheckerPatient_IDRoute,
+  AuthenticatedPatientHistoryPatient_IDRoute:
+    AuthenticatedPatientHistoryPatient_IDRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =
