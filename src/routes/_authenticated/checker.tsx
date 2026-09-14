@@ -28,6 +28,7 @@ import {
   type Condition,
   type FollowUpQuestion,
 } from "@/lib/symptoms.functions";
+
 import { LangContext, useLang, type Lang } from "@/lib/i18n";
 import { topRisk } from "@/lib/history";
 import { extractVitals } from "@/lib/vitals";
@@ -122,6 +123,52 @@ function riskClasses(level: Condition["riskLevel"]) {
   };
 }
 
+/**
+ * Detect worsening only from patient-reported content.
+ *
+ * Question text is intentionally excluded.
+ *
+ * This is only used for the non-clinical health-condition trend
+ * indicator. It is NOT used as a diagnosis or disease probability.
+ */
+function reportedWorsening(text: string): boolean {
+  const normalized = text
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) {
+    return false;
+  }
+
+  const worseningPatterns = [
+    /\bgetting worse\b/i,
+    /\bworse\b/i,
+    /\bworst\b/i,
+    /\bmore severe\b/i,
+    /\bincreasing\b/i,
+    /\bincreased\b/i,
+    /\bprogressively\b/i,
+    /\bdeteriorat/i,
+    /\bdeclining\b/i,
+    /\bdecline\b/i,
+
+    /খারাপ হচ্ছে/,
+    /খারাপ হয়েছে/,
+    /বেশি খারাপ/,
+    /ক্রমশ খারাপ/,
+    /বাড়ছে/,
+    /বেড়েছে/,
+    /তীব্র হচ্ছে/,
+    /তীব্র হয়েছে/,
+    /অবনতি/,
+  ];
+
+  return worseningPatterns.some((pattern) =>
+    pattern.test(normalized),
+  );
+}
+
 function Index() {
   const [lang, setLang] = useState<Lang>("en");
 
@@ -140,76 +187,65 @@ function AppBody() {
   const [symptoms, setSymptoms] = useState("");
   const [duration, setDuration] = useState("");
 
-  const [stage, setStage] = useState<Stage>("intake");
+  const [stage, setStage] =
+    useState<Stage>("intake");
 
-  const [questions, setQuestions] = useState<
-    FollowUpQuestion[]
-  >([]);
+  const [questions, setQuestions] =
+    useState<FollowUpQuestion[]>([]);
 
-  const [answers, setAnswers] = useState<string[]>([]);
+  const [answers, setAnswers] =
+    useState<string[]>([]);
+
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState("");
 
   const [override, setOverride] =
     useState<Assessment | null>(null);
 
-  const [clarified, setClarified] = useState(false);
+  const [clarified, setClarified] =
+    useState(false);
 
   /**
-   * null  = not saved yet
+   * null = not saved yet
+   *
    * actual UUID = successfully saved
    *
    * Never use a fake value such as "saved".
    */
-  const [savedId, setSavedId] = useState<string | null>(null);
+  const [savedId, setSavedId] =
+    useState<string | null>(null);
 
   const queryClient = useQueryClient();
 
-  const saveFn = useServerFn(saveCheck);
-  const profileFn = useServerFn(getProfile);
+  const saveFn =
+    useServerFn(saveCheck);
+
+  const profileFn =
+    useServerFn(getProfile);
 
   const profileQuery = useQuery({
     queryKey: ["profile"],
     queryFn: () => profileFn({}),
   });
 
-  const saveMutation = useMutation({
-    mutationFn: (vars: ReturnType<typeof buildRecord>) =>
-      saveFn({ data: vars }),
+  const askFn =
+    useServerFn(getFollowUpQuestions);
 
-    onSuccess: (saved) => {
-      /**
-       * saveCheck should return the inserted row/id.
-       *
-       * Keep this defensive so the UI does not claim that a
-       * record was saved when the mutation has not actually
-       * returned successfully.
-       */
-      const returnedId =
-        typeof saved === "string"
-          ? saved
-          : saved?.id ?? null;
+  const assessFn =
+    useServerFn(assessSymptoms);
 
-      if (returnedId) {
-        setSavedId(returnedId);
-      }
+  const clarifyFn =
+    useServerFn(clarifyAnswers);
 
-      queryClient.invalidateQueries({
-        queryKey: ["checks"],
-      });
-    },
-  });
+  const age =
+    profileQuery.data?.age ?? "";
 
-  const askFn = useServerFn(getFollowUpQuestions);
-  const assessFn = useServerFn(assessSymptoms);
-  const clarifyFn = useServerFn(clarifyAnswers);
-
-  const age = profileQuery.data?.age ?? "";
-  const sex = profileQuery.data?.sex ?? "";
+  const sex =
+    profileQuery.data?.sex ?? "";
 
   /**
-   * Self-check input remains exactly the existing self-check
-   * contract.
+   * Self-check input remains exactly the existing
+   * self-check contract.
    *
    * Do NOT put patientProfile here.
    */
@@ -217,17 +253,19 @@ function AppBody() {
     symptoms: symptoms.trim(),
     age: age.trim() || undefined,
     sex: sex.trim() || undefined,
-    duration: duration.trim() || undefined,
+    duration:
+      duration.trim() || undefined,
     language: lang,
   });
 
   /**
-   * Only patient-reported content is passed to vital extraction.
+   * Only patient-reported content is passed to:
    *
-   * IMPORTANT:
+   * - vital extraction
+   * - worsening detection
+   * - health-condition trend calculation
+   *
    * Questions themselves are deliberately excluded.
-   * Otherwise a question such as "Is your temperature 102°F?"
-   * could incorrectly create a vital value.
    */
   function buildPatientReportedText() {
     return [
@@ -242,52 +280,125 @@ function AppBody() {
   }
 
   /**
+   * Calculate the separate non-clinical health-condition
+   * trend score.
+   *
+   * IMPORTANT:
+   *
+   * This score is NOT:
+   * - disease probability
+   * - diagnostic confidence
+   * - Symptom Match Strength
+   * - clinical risk percentage
+   *
+   * Higher score = better reported condition.
+   * Lower score = worse reported condition.
+   */
+  function buildHealthTrendScore(
+    assessment: Assessment,
+  ): number {
+    const patientReportedText =
+      buildPatientReportedText();
+
+    const worsening =
+      reportedWorsening(
+        patientReportedText,
+      );
+
+    return calculateHealthTrendScore({
+      urgency: assessment.urgency,
+      redFlagCount:
+        assessment.redFlags.length,
+      worsening,
+    });
+  }
+
+  /**
    * Structured triage record stored with each saved check.
    *
-   * `likelihood` is a symptom-match score, NOT a calibrated
-   * probability that the user has a disease.
+   * `severity` remains the existing database-compatible
+   * Symptom Match Strength value.
+   *
+   * `healthTrendScore` is a completely separate field.
    */
-  function buildRecord(assessment: Assessment) {
-    const top = topRisk(assessment);
+  function buildRecord(
+    assessment: Assessment,
+  ) {
+    const top =
+      topRisk(assessment);
 
     const pairs = questions
       .map((q, i) => ({
         question: q.question,
-        answer: answers[i]?.trim() ?? "",
+        answer:
+          answers[i]?.trim() ?? "",
       }))
       .filter(
-        (item) => item.answer.length > 0,
+        (item) =>
+          item.answer.length > 0,
       );
 
-    const vitals = extractVitals(
-      buildPatientReportedText(),
-    ) as Record<string, number>;
+    const vitals =
+      extractVitals(
+        buildPatientReportedText(),
+      ) as Record<string, number>;
+
+    /**
+     * Separate non-clinical trend score.
+     *
+     * This must never use condition.likelihood.
+     */
+    const healthTrendScore =
+      buildHealthTrendScore(
+        assessment,
+      );
 
     return {
-      symptoms: symptoms.trim(),
+      symptoms:
+        symptoms.trim(),
 
       /**
-       * Keep database compatibility with existing schema.
-       * UI/report must NOT label this as diagnostic probability.
+       * Existing database compatibility.
+       *
+       * This represents the strongest relative
+       * Symptom Match Strength.
+       *
+       * It is NOT a probability.
        */
-      severity: top.likelihood,
+      severity:
+        top.likelihood,
 
-      urgency: assessment.urgency,
+      /**
+       * Separate health-condition trend indicator.
+       *
+       * Higher = better reported condition.
+       * Lower = worse reported condition.
+       *
+       * NOT a clinical score.
+       */
+      healthTrendScore,
 
-      topCondition: top.condition?.name ?? "",
+      urgency:
+        assessment.urgency,
 
-      summary: assessment.summary,
+      topCondition:
+        top.condition?.name ?? "",
+
+      summary:
+        assessment.summary,
 
       answers: pairs,
 
       redFlag:
         assessment.redFlags.length > 0,
 
-      redFlags: assessment.redFlags,
+      redFlags:
+        assessment.redFlags,
 
       categories:
         assessment.conditions.map(
-          (condition) => condition.name,
+          (condition) =>
+            condition.name,
         ),
 
       supportingFactors:
@@ -296,27 +407,32 @@ function AppBody() {
 
       vitals,
 
-      uncertainty: `${assessment.confidence}${
-        assessment.confidenceNote
-          ? ` — ${assessment.confidenceNote}`
-          : ""
-      }`,
+      uncertainty:
+        `${assessment.confidence}${
+          assessment.confidenceNote
+            ? ` — ${assessment.confidenceNote}`
+            : ""
+        }`,
 
-      nextStep: assessment.nextStep ?? "",
+      nextStep:
+        assessment.nextStep ?? "",
     };
   }
 
   /**
    * Emergency assessment happens before follow-up questions.
    *
-   * This function must be responsible only for actual
+   * This function is responsible only for actual
    * patient-reported warning signs.
    */
   function startCheck() {
-    const input = baseInput();
+    const input =
+      baseInput();
 
     const emergency =
-      immediateEmergencyAssessment(input);
+      immediateEmergencyAssessment(
+        input,
+      );
 
     if (emergency) {
       setOverride(emergency);
@@ -327,95 +443,164 @@ function AppBody() {
     questionsMutation.mutate();
   }
 
-  const questionsMutation = useMutation({
-    mutationFn: () =>
-      askFn({
-        data: baseInput(),
-      }),
+  const questionsMutation =
+    useMutation({
+      mutationFn: () =>
+        askFn({
+          data: baseInput(),
+        }),
 
-    onSuccess: (qs) => {
-      setQuestions(qs);
-      setAnswers(
-        new Array(qs.length).fill(""),
-      );
-      setStep(0);
-      setDraft("");
-      setStage("questions");
-      setOverride(null);
-      setSavedId(null);
-      setClarified(false);
-    },
-  });
+      onSuccess: (qs) => {
+        setQuestions(qs);
 
-  const assessMutation = useMutation({
-    mutationFn: (
-      finalAnswers: string[],
-    ) =>
-      assessFn({
-        data: {
-          ...baseInput(),
+        setAnswers(
+          new Array(qs.length).fill(
+            "",
+          ),
+        );
 
-          answers: questions
-            .map((q, i) => ({
-              question: q.question,
-              answer:
-                finalAnswers[i]?.trim() ?? "",
-            }))
-            .filter(
-              (item) =>
-                item.answer.length > 0,
-            ),
-        },
-      }),
+        setStep(0);
+        setDraft("");
+        setStage("questions");
+        setOverride(null);
+        setSavedId(null);
+        setClarified(false);
+      },
+    });
 
-    onSuccess: () => {
-      setStage("result");
-    },
-  });
+  const assessMutation =
+    useMutation({
+      mutationFn: (
+        finalAnswers: string[],
+      ) =>
+        assessFn({
+          data: {
+            ...baseInput(),
 
-  const clarifyMutation = useMutation({
-    mutationFn: (
-      finalAnswers: string[],
-    ) =>
-      clarifyFn({
-        data: {
-          ...baseInput(),
+            answers: questions
+              .map((q, i) => ({
+                question:
+                  q.question,
 
-          answers: questions
-            .map((q, i) => ({
-              question: q.question,
-              answer:
-                finalAnswers[i]?.trim() ?? "",
-            }))
-            .filter(
-              (item) =>
-                item.answer.length > 0,
-            ),
-        },
-      }),
-  });
+                answer:
+                  finalAnswers[
+                    i
+                  ]?.trim() ?? "",
+              }))
+              .filter(
+                (item) =>
+                  item.answer
+                    .length > 0,
+              ),
+          },
+        }),
 
-  const result: Assessment | undefined =
-    override ?? assessMutation.data;
+      onSuccess: () => {
+        setStage("result");
+      },
+    });
+
+  const clarifyMutation =
+    useMutation({
+      mutationFn: (
+        finalAnswers: string[],
+      ) =>
+        clarifyFn({
+          data: {
+            ...baseInput(),
+
+            answers: questions
+              .map((q, i) => ({
+                question:
+                  q.question,
+
+                answer:
+                  finalAnswers[
+                    i
+                  ]?.trim() ?? "",
+              }))
+              .filter(
+                (item) =>
+                  item.answer
+                    .length > 0,
+              ),
+          },
+        }),
+    });
+
+  const saveMutation =
+    useMutation({
+      mutationFn: (
+        vars: ReturnType<
+          typeof buildRecord
+        >,
+      ) =>
+        saveFn({
+          data: vars,
+        }),
+
+      onSuccess: (saved) => {
+        /**
+         * saveCheck should return
+         * the inserted row/id.
+         *
+         * Never claim "Saved" before
+         * actual mutation success.
+         */
+        const returnedId =
+          typeof saved === "string"
+            ? saved
+            : saved?.id ?? null;
+
+        if (returnedId) {
+          setSavedId(
+            returnedId,
+          );
+        }
+
+        /**
+         * Self history only.
+         *
+         * Patient history uses its
+         * own patient-specific query key.
+         */
+        queryClient.invalidateQueries(
+          {
+            queryKey: [
+              "checks",
+            ],
+          },
+        );
+      },
+    });
+
+  const result:
+    | Assessment
+    | undefined =
+    override ??
+    assessMutation.data;
 
   /**
-   * IMPORTANT:
+   * Emergency and urgent are different states.
    *
-   * emergency and urgent are different states.
-   *
-   * A high-risk condition is NOT automatically classified
-   * as an emergency.
+   * High-risk condition is NOT automatically
+   * classified as an emergency.
    */
   const isEmergency =
-    result?.urgency === "emergency";
+    result?.urgency ===
+    "emergency";
 
   const isUrgent =
-    result?.urgency === "urgent";
+    result?.urgency ===
+    "urgent";
 
   /**
    * Emergency results are automatically saved.
    *
-   * Crucially, savedId is set ONLY after mutation success.
+   * Health trend score is generated as a separate
+   * field during buildRecord().
+   *
+   * savedId is set ONLY after mutation success.
    */
   useEffect(() => {
     if (
@@ -439,53 +624,68 @@ function AppBody() {
     saveMutation.isPending,
   ]);
 
-  const answeredPairs = useMemo(
-    () =>
-      questions
-        .map((q, i) => ({
-          question: q.question,
-          answer:
-            answers[i]?.trim() ?? "",
-        }))
-        .filter(
-          (item) =>
-            item.answer.length > 0,
-        ),
-    [questions, answers],
-  );
+  const answeredPairs =
+    useMemo(
+      () =>
+        questions
+          .map((q, i) => ({
+            question:
+              q.question,
 
-  function submitAnswer(value: string) {
-    const next = [...answers];
+            answer:
+              answers[i]?.trim() ??
+              "",
+          }))
+          .filter(
+            (item) =>
+              item.answer
+                .length > 0,
+          ),
+      [questions, answers],
+    );
+
+  function submitAnswer(
+    value: string,
+  ) {
+    const next = [
+      ...answers,
+    ];
 
     next[step] = value;
 
     setAnswers(next);
     setDraft("");
 
-    const pairs = questions
-      .map((q, i) => ({
-        question: q.question,
-        answer:
-          next[i]?.trim() ?? "",
-      }))
-      .filter(
-        (item) =>
-          item.answer.length > 0,
-      );
+    const pairs =
+      questions
+        .map((q, i) => ({
+          question:
+            q.question,
+
+          answer:
+            next[i]?.trim() ??
+            "",
+        }))
+        .filter(
+          (item) =>
+            item.answer
+              .length > 0,
+        );
 
     /**
-     * Emergency warning-sign detection gets ONLY the
-     * actual patient answers plus the existing symptom
-     * input.
+     * Emergency warning-sign detection gets
+     * ONLY actual patient answers plus the
+     * existing symptom input.
      *
-     * The detector implementation must not treat question
-     * text as patient symptoms.
+     * Question text is not treated as symptoms.
      */
     const emergency =
-      immediateEmergencyAssessment({
-        ...baseInput(),
-        answers: pairs,
-      });
+      immediateEmergencyAssessment(
+        {
+          ...baseInput(),
+          answers: pairs,
+        },
+      );
 
     if (emergency) {
       setOverride(emergency);
@@ -502,57 +702,80 @@ function AppBody() {
     }
 
     /**
-     * One clarification pass before final assessment.
+     * One clarification pass before
+     * final assessment.
      */
     if (!clarified) {
-      clarifyMutation.mutate(next, {
-        onSuccess: (extra) => {
-          setClarified(true);
+      clarifyMutation.mutate(
+        next,
+        {
+          onSuccess: (
+            extra,
+          ) => {
+            setClarified(true);
 
-          if (extra) {
-            setQuestions([
-              ...questions,
-              extra,
-            ]);
+            if (extra) {
+              setQuestions([
+                ...questions,
+                extra,
+              ]);
 
-            setAnswers([
-              ...next,
-              "",
-            ]);
+              setAnswers([
+                ...next,
+                "",
+              ]);
 
-            setStep(
-              questions.length,
+              setStep(
+                questions.length,
+              );
+            } else {
+              assessMutation.mutate(
+                next,
+              );
+            }
+          },
+
+          onError: () => {
+            setClarified(true);
+
+            assessMutation.mutate(
+              next,
             );
-          } else {
-            assessMutation.mutate(next);
-          }
+          },
         },
-
-        onError: () => {
-          setClarified(true);
-          assessMutation.mutate(next);
-        },
-      });
+      );
 
       return;
     }
 
-    assessMutation.mutate(next);
+    assessMutation.mutate(
+      next,
+    );
   }
 
   function reset() {
     setStage("intake");
+
     setQuestions([]);
+
     setAnswers([]);
+
     setStep(0);
+
     setDraft("");
+
     setSavedId(null);
+
     setOverride(null);
+
     setClarified(false);
 
     questionsMutation.reset();
+
     assessMutation.reset();
+
     clarifyMutation.reset();
+
     saveMutation.reset();
   }
 
@@ -568,6 +791,20 @@ function AppBody() {
       saveMutation.error) as
       | Error
       | null;
+
+  /**
+   * Current result's separate health-condition
+   * trend score.
+   *
+   * This is calculated only from the actual
+   * patient-reported information.
+   */
+  const currentHealthTrendScore =
+    result
+      ? buildHealthTrendScore(
+          result,
+        )
+      : null;
 
   return (
     <main
@@ -599,29 +836,29 @@ function AppBody() {
             role="group"
             aria-label={t.langLabel}
           >
-            {(["en", "bn"] as Lang[]).map(
-              (l) => (
-                <button
-                  key={l}
-                  type="button"
-                  onClick={() =>
-                    setLang(l)
-                  }
-                  aria-pressed={
-                    lang === l
-                  }
-                  className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                    lang === l
-                      ? "bg-primary text-primary-foreground"
-                      : "text-secondary-foreground hover:bg-accent hover:text-accent-foreground"
-                  }`}
-                >
-                  {l === "en"
-                    ? "English"
-                    : "বাংলা"}
-                </button>
-              ),
-            )}
+            {(
+              ["en", "bn"] as Lang[]
+            ).map((l) => (
+              <button
+                key={l}
+                type="button"
+                onClick={() =>
+                  setLang(l)
+                }
+                aria-pressed={
+                  lang === l
+                }
+                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                  lang === l
+                    ? "bg-primary text-primary-foreground"
+                    : "text-secondary-foreground hover:bg-accent hover:text-accent-foreground"
+                }`}
+              >
+                {l === "en"
+                  ? "English"
+                  : "বাংলা"}
+              </button>
+            ))}
           </div>
         </header>
 
@@ -629,7 +866,8 @@ function AppBody() {
           {/* =========================
               INTAKE
              ========================= */}
-          {stage === "intake" && (
+          {stage ===
+            "intake" && (
             <Card className="border-border/70 shadow-soft">
               <CardHeader>
                 <CardTitle className="font-display text-2xl font-normal">
@@ -652,7 +890,8 @@ function AppBody() {
                     value={symptoms}
                     onChange={(e) =>
                       setSymptoms(
-                        e.target.value,
+                        e.target
+                          .value,
                       )
                     }
                     aria-describedby="symptom-examples"
@@ -662,10 +901,16 @@ function AppBody() {
                     id="symptom-examples"
                     className="flex flex-wrap gap-2 pt-1"
                   >
-                    {EXAMPLES[lang].map(
-                      (example) => (
+                    {EXAMPLES[
+                      lang
+                    ].map(
+                      (
+                        example,
+                      ) => (
                         <button
-                          key={example}
+                          key={
+                            example
+                          }
                           type="button"
                           onClick={() =>
                             setSymptoms(
@@ -674,7 +919,9 @@ function AppBody() {
                           }
                           className="rounded-full border border-border bg-secondary px-3 py-1 text-xs text-secondary-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
                         >
-                          {example}
+                          {
+                            example
+                          }
                         </button>
                       ),
                     )}
@@ -691,11 +938,13 @@ function AppBody() {
                     value={duration}
                     onChange={(e) =>
                       setDuration(
-                        e.target.value,
+                        e.target
+                          .value,
                       )
                     }
                     placeholder={
-                      lang === "bn"
+                      lang ===
+                      "bn"
                         ? "যেমন: ৩ দিন"
                         : "e.g. 3 days"
                     }
@@ -706,27 +955,38 @@ function AppBody() {
                   size="lg"
                   className="w-full"
                   disabled={
-                    symptoms.trim()
-                      .length < 3 ||
+                    symptoms
+                      .trim()
+                      .length <
+                      3 ||
                     questionsMutation.isPending
                   }
-                  onClick={startCheck}
+                  onClick={
+                    startCheck
+                  }
                 >
                   {questionsMutation.isPending ? (
                     <>
                       <Loader2 className="mr-2 size-4 animate-spin" />
-                      {t.preparing}
+
+                      {
+                        t.preparing
+                      }
                     </>
                   ) : (
                     <>
                       <MessageCircleQuestion className="mr-2 size-4" />
-                      {t.continue}
+
+                      {
+                        t.continue
+                      }
                     </>
                   )}
                 </Button>
 
                 <p className="text-center text-xs leading-relaxed text-muted-foreground">
-                  {lang === "bn"
+                  {lang ===
+                  "bn"
                     ? "এই মূল্যায়নটি তথ্য ও triage সহায়তা দেওয়ার জন্য। এটি নিশ্চিত রোগ নির্ণয় নয়।"
                     : "This assessment provides symptom and triage support. It is not a definitive diagnosis."}
                 </p>
@@ -737,15 +997,20 @@ function AppBody() {
           {/* =========================
               FOLLOW-UP QUESTIONS
              ========================= */}
-          {stage === "questions" && (
+          {stage ===
+            "questions" && (
             <Card className="border-border/70 shadow-soft">
               <CardHeader className="pb-2">
                 <CardTitle className="font-display text-2xl font-normal">
-                  {t.askingQuestions}
+                  {
+                    t.askingQuestions
+                  }
                 </CardTitle>
 
                 <p className="text-sm text-muted-foreground">
-                  {t.questionsIntro}
+                  {
+                    t.questionsIntro
+                  }
                 </p>
               </CardHeader>
 
@@ -767,7 +1032,8 @@ function AppBody() {
                       style={{
                         width: `${
                           questions.length
-                            ? ((step + 1) /
+                            ? ((step +
+                                1) /
                                 questions.length) *
                               100
                             : 0
@@ -783,39 +1049,54 @@ function AppBody() {
                 >
                   <p className="font-display text-xl leading-snug">
                     {
-                      questions[step]
-                        ?.question
+                      questions[
+                        step
+                      ]?.question
                     }
                   </p>
 
-                  {questions[step]
-                    ?.why ? (
+                  {questions[
+                    step
+                  ]?.why ? (
                     <p className="text-sm text-muted-foreground">
                       {
-                        questions[step]
-                          ?.why
+                        questions[
+                          step
+                        ]?.why
                       }
                     </p>
                   ) : null}
                 </div>
 
-                {(questions[step]
-                  ?.options ?? []
-                ).length > 0 && (
+                {(
+                  questions[
+                    step
+                  ]?.options ??
+                  []
+                ).length >
+                  0 && (
                   <div
                     className="flex flex-wrap gap-2"
                     role="group"
                     aria-label="Answer options"
                   >
                     {(
-                      questions[step]
-                        ?.options ?? []
+                      questions[
+                        step
+                      ]?.options ??
+                      []
                     ).map(
-                      (option) => (
+                      (
+                        option,
+                      ) => (
                         <button
-                          key={option}
+                          key={
+                            option
+                          }
                           type="button"
-                          disabled={busy}
+                          disabled={
+                            busy
+                          }
                           onClick={() =>
                             submitAnswer(
                               option,
@@ -823,7 +1104,9 @@ function AppBody() {
                           }
                           className="rounded-full border border-border bg-secondary px-3 py-1.5 text-sm text-secondary-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          {option}
+                          {
+                            option
+                          }
                         </button>
                       ),
                     )}
@@ -838,7 +1121,8 @@ function AppBody() {
                   value={draft}
                   onChange={(e) =>
                     setDraft(
-                      e.target.value,
+                      e.target
+                        .value,
                     )
                   }
                   disabled={busy}
@@ -848,8 +1132,10 @@ function AppBody() {
                 <div className="flex flex-wrap gap-2">
                   <Button
                     disabled={
-                      draft.trim()
-                        .length === 0 ||
+                      draft
+                        .trim()
+                        .length ===
+                        0 ||
                       busy
                     }
                     onClick={() =>
@@ -866,22 +1152,30 @@ function AppBody() {
                           ? t.checkingAnswers
                           : t.analyzing}
                       </>
-                    ) : step + 1 <
+                    ) : step +
+                        1 <
                       questions.length ? (
                       t.next
                     ) : (
                       <>
                         <Activity className="mr-2 size-4" />
-                        {t.analyze}
+
+                        {
+                          t.analyze
+                        }
                       </>
                     )}
                   </Button>
 
                   <Button
                     variant="ghost"
-                    disabled={busy}
+                    disabled={
+                      busy
+                    }
                     onClick={() =>
-                      submitAnswer("")
+                      submitAnswer(
+                        "",
+                      )
                     }
                   >
                     {t.skip}
@@ -889,10 +1183,16 @@ function AppBody() {
 
                   <Button
                     variant="ghost"
-                    disabled={busy}
-                    onClick={reset}
+                    disabled={
+                      busy
+                    }
+                    onClick={
+                      reset
+                    }
                   >
-                    {t.startOver}
+                    {
+                      t.startOver
+                    }
                   </Button>
                 </div>
               </CardContent>
@@ -909,13 +1209,16 @@ function AppBody() {
 
                 <div className="space-y-1">
                   <p className="font-medium text-destructive">
-                    {lang === "bn"
+                    {lang ===
+                    "bn"
                       ? "মূল্যায়ন সম্পূর্ণ করা যায়নি"
                       : "The assessment could not be completed"}
                   </p>
 
                   <p className="text-sm text-destructive/90">
-                    {error.message}
+                    {
+                      error.message
+                    }
                   </p>
 
                   <Button
@@ -928,12 +1231,15 @@ function AppBody() {
                         "questions"
                       ) {
                         questionsMutation.reset();
+
                         assessMutation.reset();
+
                         clarifyMutation.reset();
                       }
                     }}
                   >
-                    {lang === "bn"
+                    {lang ===
+                    "bn"
                       ? "আবার চেষ্টা করুন"
                       : "Try again"}
                   </Button>
@@ -945,7 +1251,8 @@ function AppBody() {
           {/* =========================
               RESULT
              ========================= */}
-          {stage === "result" &&
+          {stage ===
+            "result" &&
             result && (
               <section
                 className="space-y-6"
@@ -975,13 +1282,15 @@ function AppBody() {
                       >
                         {
                           t.urgency[
-                            result.urgency
+                            result
+                              .urgency
                           ]
                         }
                       </Badge>
 
                       <span className="text-xs text-muted-foreground">
-                        {lang === "bn"
+                        {lang ===
+                        "bn"
                           ? "লক্ষণভিত্তিক মূল্যায়ন"
                           : "Symptom-based assessment"}
                       </span>
@@ -998,7 +1307,9 @@ function AppBody() {
 
                       <div className="min-w-0">
                         <p className="font-display text-xl leading-snug">
-                          {result.summary}
+                          {
+                            result.summary
+                          }
                         </p>
 
                         <p className="mt-2 text-sm text-muted-foreground">
@@ -1020,7 +1331,8 @@ function AppBody() {
                         </span>{" "}
                         {
                           t.confidence[
-                            result.confidence
+                            result
+                              .confidence
                           ]
                         }
 
@@ -1031,8 +1343,10 @@ function AppBody() {
                     </div>
 
                     {/* Missing information */}
-                    {result.missingInfo
-                      .length > 0 && (
+                    {result
+                      .missingInfo
+                      .length >
+                      0 && (
                       <div className="rounded-lg bg-secondary px-3 py-3 text-xs text-secondary-foreground">
                         <p className="mb-1 font-medium">
                           {
@@ -1042,13 +1356,17 @@ function AppBody() {
 
                         <ul className="list-disc space-y-0.5 pl-4">
                           {result.missingInfo.map(
-                            (missing) => (
+                            (
+                              missing,
+                            ) => (
                               <li
                                 key={
                                   missing
                                 }
                               >
-                                {missing}
+                                {
+                                  missing
+                                }
                               </li>
                             ),
                           )}
@@ -1085,20 +1403,25 @@ function AppBody() {
                         }
                       >
                         <Download className="mr-2 size-4" />
-                        {t.download}
+
+                        {
+                          t.download
+                        }
                       </Button>
 
                       <Button
                         variant="outline"
                         size="sm"
                         disabled={
-                          savedId !== null ||
+                          savedId !==
+                            null ||
                           saveMutation.isPending
                         }
                         onClick={() => {
                           if (
                             !result ||
-                            savedId !== null ||
+                            savedId !==
+                              null ||
                             saveMutation.isPending
                           ) {
                             return;
@@ -1114,6 +1437,7 @@ function AppBody() {
                         {saveMutation.isPending ? (
                           <>
                             <Loader2 className="mr-2 size-4 animate-spin" />
+
                             {lang ===
                             "bn"
                               ? "সংরক্ষণ হচ্ছে…"
@@ -1122,6 +1446,7 @@ function AppBody() {
                         ) : savedId ? (
                           <>
                             <Save className="mr-2 size-4" />
+
                             {lang ===
                             "bn"
                               ? "সংরক্ষিত"
@@ -1130,6 +1455,7 @@ function AppBody() {
                         ) : (
                           <>
                             <Save className="mr-2 size-4" />
+
                             {lang ===
                             "bn"
                               ? "ইতিহাসে সংরক্ষণ"
@@ -1141,15 +1467,20 @@ function AppBody() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={reset}
+                        onClick={
+                          reset
+                        }
                       >
-                        {t.startOver}
+                        {
+                          t.startOver
+                        }
                       </Button>
                     </div>
 
                     {saveMutation.isError && (
                       <p className="text-xs text-destructive">
-                        {lang === "bn"
+                        {lang ===
+                        "bn"
                           ? "ইতিহাসে সংরক্ষণ করা যায়নি। আবার চেষ্টা করুন।"
                           : "Could not save this assessment to history. Please try again."}
                       </p>
@@ -1157,13 +1488,82 @@ function AppBody() {
 
                     {savedId && (
                       <p className="text-xs text-muted-foreground">
-                        {lang === "bn"
+                        {lang ===
+                        "bn"
                           ? "এই assessment সফলভাবে history-তে সংরক্ষিত হয়েছে।"
                           : "This assessment was successfully saved to your history."}
                       </p>
                     )}
                   </CardContent>
                 </Card>
+
+                {/* =========================
+                    HEALTH CONDITION TREND
+                   ========================= */}
+                {currentHealthTrendScore !==
+                  null && (
+                  <Card className="border-border/70 shadow-soft">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2 font-display text-xl font-normal">
+                        <HeartPulse className="size-5 text-primary" />
+
+                        {lang ===
+                        "bn"
+                          ? "বর্তমান Health Condition Trend"
+                          : "Current Health Condition Trend"}
+                      </CardTitle>
+
+                      <p className="text-sm text-muted-foreground">
+                        {lang ===
+                        "bn"
+                          ? "এই ০–১০০ score আপনার এই check-এ reported condition-এর একটি non-clinical trend indicator। বেশি score তুলনামূলকভাবে ভালো reported condition এবং কম score তুলনামূলকভাবে খারাপ reported condition বোঝায়। এটি diagnosis বা risk percentage নয়।"
+                          : "This 0–100 score is a non-clinical trend indicator based on what was reported in this check. A higher score indicates a better reported condition and a lower score indicates a worse reported condition. It is not a diagnosis or risk percentage."}
+                      </p>
+                    </CardHeader>
+
+                    <CardContent>
+                      <div className="flex items-center gap-4">
+                        <div className="h-3 flex-1 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-primary transition-all"
+                            style={{
+                              width: `${currentHealthTrendScore}%`,
+                            }}
+                          />
+                        </div>
+
+                        <span className="min-w-12 text-right text-lg font-semibold text-primary">
+                          {
+                            currentHealthTrendScore
+                          }
+                        </span>
+                      </div>
+
+                      <div className="mt-2 flex justify-between text-[11px] text-muted-foreground">
+                        <span>
+                          {lang ===
+                          "bn"
+                            ? "খারাপ reported condition"
+                            : "Worse reported condition"}
+                        </span>
+
+                        <span>
+                          {lang ===
+                          "bn"
+                            ? "ভালো reported condition"
+                            : "Better reported condition"}
+                        </span>
+                      </div>
+
+                      <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+                        {lang ===
+                        "bn"
+                          ? "পরবর্তী check-এ এই score বাড়লে graph উপরে উঠবে এবং কমলে graph নিচে নামবে। এটি validated clinical health score নয়।"
+                          : "In later checks, a higher score will move the trend graph upward and a lower score will move it downward. This is not a validated clinical health score."}
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
 
                 {/* Emergency */}
                 {isEmergency && (
@@ -1196,13 +1596,17 @@ function AppBody() {
                     </Card>
                   )}
 
-                {/* Symptom match strength */}
+                {/* =========================
+                    SYMPTOM MATCH STRENGTH
+                   ========================= */}
                 {result.conditions
-                  .length > 0 && (
+                  .length >
+                  0 && (
                   <Card className="border-border/70 shadow-soft">
                     <CardHeader>
                       <CardTitle className="font-display text-xl font-normal">
-                        {lang === "bn"
+                        {lang ===
+                        "bn"
                           ? "সম্ভাব্য মিল"
                           : "Symptom Match Strength"}
                       </CardTitle>
@@ -1241,7 +1645,8 @@ function AppBody() {
                             <Collapsible
                               key={`${condition.name}-${index}`}
                               defaultOpen={
-                                index === 0
+                                index ===
+                                0
                               }
                             >
                               <div className="rounded-xl border border-border/70 p-4">
@@ -1277,7 +1682,9 @@ function AppBody() {
                                       <span
                                         className={`text-sm font-semibold ${classes.text}`}
                                       >
-                                        {score}
+                                        {
+                                          score
+                                        }
                                       </span>
                                     </div>
 
@@ -1294,7 +1701,8 @@ function AppBody() {
 
                                 <CollapsibleContent className="pt-4">
                                   <div className="space-y-4 text-sm">
-                                    {condition.contributingFactors
+                                    {condition
+                                      .contributingFactors
                                       ?.length >
                                       0 && (
                                       <div>
@@ -1311,10 +1719,17 @@ function AppBody() {
                                               factor,
                                             ) => (
                                               <li
-                                                key={factor.factor}
+                                                key={
+                                                  factor.factor
+                                                }
                                               >
-                                                {factor.factor}
-                                                {factor.effect ? ` — ${factor.effect}` : ""}
+                                                {
+                                                  factor.factor
+                                                }
+
+                                                {factor.effect
+                                                  ? ` — ${factor.effect}`
+                                                  : ""}
                                               </li>
                                             ),
                                           )}
@@ -1323,7 +1738,11 @@ function AppBody() {
                                     )}
 
                                     {condition.contributingFactors.some(
-                                      (factor) => factor.weight < 0,
+                                      (
+                                        factor,
+                                      ) =>
+                                        factor.weight <
+                                        0,
                                     ) && (
                                       <div>
                                         <p className="mb-1 font-medium">
@@ -1335,16 +1754,32 @@ function AppBody() {
 
                                         <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
                                           {condition.contributingFactors
-                                            .filter((factor) => factor.weight < 0)
-                                            .map((factor) => (
-                                              <li
-                                                key={factor.factor}
-                                              >
-                                                {factor.factor}
-                                                {factor.effect ? ` — ${factor.effect}` : ""}
-                                              </li>
-                                            ),
-                                          )}
+                                            .filter(
+                                              (
+                                                factor,
+                                              ) =>
+                                                factor.weight <
+                                                0,
+                                            )
+                                            .map(
+                                              (
+                                                factor,
+                                              ) => (
+                                                <li
+                                                  key={
+                                                    factor.factor
+                                                  }
+                                                >
+                                                  {
+                                                    factor.factor
+                                                  }
+
+                                                  {factor.effect
+                                                    ? ` — ${factor.effect}`
+                                                    : ""}
+                                                </li>
+                                              ),
+                                            )}
                                         </ul>
                                       </div>
                                     )}
@@ -1364,7 +1799,8 @@ function AppBody() {
                   <Card className="border-border/70 shadow-soft">
                     <CardHeader>
                       <CardTitle className="font-display text-xl font-normal">
-                        {lang === "bn"
+                        {lang ===
+                        "bn"
                           ? "পরবর্তী পদক্ষেপ"
                           : "Next step"}
                       </CardTitle>
@@ -1372,19 +1808,23 @@ function AppBody() {
 
                     <CardContent>
                       <p className="text-sm leading-6 text-muted-foreground">
-                        {result.nextStep}
+                        {
+                          result.nextStep
+                        }
                       </p>
                     </CardContent>
                   </Card>
                 )}
 
                 {/* Self-care */}
-                {result.selfCare?.length >
+                {result.selfCare
+                  ?.length >
                   0 && (
                   <Card className="border-border/70 shadow-soft">
                     <CardHeader>
                       <CardTitle className="font-display text-xl font-normal">
-                        {lang === "bn"
+                        {lang ===
+                        "bn"
                           ? "নিজের যত্ন"
                           : "Self-care"}
                       </CardTitle>
@@ -1393,9 +1833,17 @@ function AppBody() {
                     <CardContent>
                       <ul className="list-disc space-y-2 pl-5 text-sm leading-6 text-muted-foreground">
                         {result.selfCare.map(
-                          (item) => (
-                            <li key={item}>
-                              {item}
+                          (
+                            item,
+                          ) => (
+                            <li
+                              key={
+                                item
+                              }
+                            >
+                              {
+                                item
+                              }
                             </li>
                           ),
                         )}
@@ -1413,11 +1861,13 @@ function AppBody() {
 
                 {/* Red flags */}
                 {result.redFlags
-                  .length > 0 && (
+                  .length >
+                  0 && (
                   <Card className="border-destructive/30 bg-destructive/5">
                     <CardHeader>
                       <CardTitle className="flex items-center gap-2 font-display text-xl font-normal text-destructive">
                         <AlertTriangle className="size-5" />
+
                         {lang ===
                         "bn"
                           ? "সতর্কতার লক্ষণ"
@@ -1428,11 +1878,17 @@ function AppBody() {
                     <CardContent>
                       <ul className="list-disc space-y-2 pl-5 text-sm leading-6">
                         {result.redFlags.map(
-                          (flag) => (
+                          (
+                            flag,
+                          ) => (
                             <li
-                              key={flag}
+                              key={
+                                flag
+                              }
                             >
-                              {flag}
+                              {
+                                flag
+                              }
                             </li>
                           ),
                         )}
@@ -1445,9 +1901,10 @@ function AppBody() {
                 <Card className="border-border/50 bg-muted/30">
                   <CardContent className="pt-5">
                     <p className="text-xs leading-relaxed text-muted-foreground">
-                      {lang === "bn"
-                        ? "গুরুত্বপূর্ণ: SymptomScope কোনো নিশ্চিত রোগ নির্ণয় করে না। ফলাফল উপসর্গের তথ্যের ভিত্তিতে একটি decision-support ও triage assessment। গুরুতর, দ্রুত খারাপ হওয়া বা উদ্বেগজনক উপসর্গ থাকলে healthcare professional-এর পরামর্শ নিন।"
-                        : "Important: SymptomScope does not provide a definitive diagnosis. Results are decision-support and triage assessments based on the information provided. Seek professional medical care for severe, rapidly worsening, or concerning symptoms."}
+                      {lang ===
+                      "bn"
+                        ? "গুরুত্বপূর্ণ: SymptomScope কোনো নিশ্চিত রোগ নির্ণয় করে না। ফলাফল উপসর্গের তথ্যের ভিত্তিতে একটি decision-support ও triage assessment। Health Condition Trend একটি non-clinical trend indicator; এটি কোনো validated medical score বা risk percentage নয়। গুরুতর, দ্রুত খারাপ হওয়া বা উদ্বেগজনক উপসর্গ থাকলে healthcare professional-এর পরামর্শ নিন।"
+                        : "Important: SymptomScope does not provide a definitive diagnosis. Results are decision-support and triage assessments based on the information provided. The Health Condition Trend is a non-clinical trend indicator, not a validated medical score or risk percentage. Seek professional medical care for severe, rapidly worsening, or concerning symptoms."}
                     </p>
                   </CardContent>
                 </Card>
