@@ -2324,9 +2324,17 @@ export const clarifyAnswers =
             ),
           );
 
-        return ClarificationSchema
-          .parse(raw)
-          .clarification;
+        const clarification =
+          ClarificationSchema
+            .parse(raw)
+            .clarification;
+
+        return clarification
+          ? {
+              ...clarification,
+              id: "clarification-1",
+            }
+          : clarification;
       },
     );
 
