@@ -353,18 +353,20 @@ function langLine(
 type SafetyInput = {
   symptoms: string;
 
-  answers?: {
-    question: string;
-    answer: string;
-  }[];
+  answers?:
+    | {
+        question: string;
+        answer: string;
+      }[]
+    | undefined;
 
-  age?: string;
+  age?: string | undefined;
 
-  duration?: string;
+  duration?: string | undefined;
 
-  severity?: number;
+  severity?: number | undefined;
 
-  language?: "en" | "bn";
+  language?: "en" | "bn" | undefined;
 };
 
 /**
@@ -2324,9 +2326,17 @@ export const clarifyAnswers =
             ),
           );
 
-        return ClarificationSchema
-          .parse(raw)
-          .clarification;
+        const clarification =
+          ClarificationSchema
+            .parse(raw)
+            .clarification;
+
+        return clarification
+          ? {
+              ...clarification,
+              id: "clarification-1",
+            }
+          : clarification;
       },
     );
 

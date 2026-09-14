@@ -1464,12 +1464,12 @@ function PatientChecker({
 
                         {questions[
                           step
-                        ].help ? (
+                        ].why ? (
                           <p className="mt-2 text-sm leading-6 text-muted-foreground">
                             {
                               questions[
                                 step
-                              ].help
+                              ].why
                             }
                           </p>
                         ) : null}
@@ -1976,13 +1976,13 @@ function PatientResult({
           {/* Uncertainty                                                     */}
           {/* -------------------------------------------------------------- */}
 
-          {assessment.uncertainty ? (
+          {assessment.confidenceNote ? (
             <div className="rounded-lg bg-muted/50 px-4 py-3 text-xs leading-5 text-muted-foreground">
               <span className="font-medium text-foreground">
                 Important:
               </span>{" "}
               {
-                assessment.uncertainty
+                assessment.confidenceNote
               }
             </div>
           ) : null}

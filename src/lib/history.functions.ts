@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/lib/auth.server";
+import type { Json } from "@/integrations/supabase/types";
 
 /* -------------------------------------------------------------------------- */
 /*                                  Schemas                                   */
@@ -166,7 +167,7 @@ const SaveCheckSchema = z.object({
   vitals:
     z.record(
       z.string(),
-      z.unknown(),
+      z.any(),
     )
       .optional()
       .nullable(),
@@ -206,6 +207,8 @@ export type HistoryCheck = {
   id: string;
 
   createdAt: string;
+
+  date: string;
 
   symptoms: string;
 
@@ -262,7 +265,7 @@ export type HistoryCheck = {
   nextStep: string;
 
   vitals:
-    Record<string, unknown> | null;
+    Json | null;
 
   subjectType:
     HistorySubjectType;
@@ -335,6 +338,9 @@ function mapHistoryRow(
       row.id,
 
     createdAt:
+      row.created_at,
+
+    date:
       row.created_at,
 
     symptoms:
