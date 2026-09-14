@@ -1,0 +1,1 @@
+ALTER TABLE public.symptom_checks ADD COLUMN IF NOT EXISTS duration text NOT NULL DEFAULT '';
