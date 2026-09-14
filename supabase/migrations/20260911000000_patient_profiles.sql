@@ -1,10 +1,13 @@
 -- ============================================================
--- SymptomScope — Patient Profiles & Separate Patient History
+-- SymptomScope
+-- Patient Profiles + Separate Patient History
+-- + Health Condition Trend
 -- ============================================================
 
--- ------------------------------------------------------------
--- 1. Extend the logged-in user's own profile
--- ------------------------------------------------------------
+
+-- ============================================================
+-- 1. EXTEND THE LOGGED-IN USER'S OWN PROFILE
+-- ============================================================
 
 ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS allergies TEXT,
@@ -15,9 +18,10 @@ ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS family_history TEXT,
   ADD COLUMN IF NOT EXISTS pregnancy_status TEXT;
 
--- ------------------------------------------------------------
--- 2. Separate profiles for "Someone Else"
--- ------------------------------------------------------------
+
+-- ============================================================
+-- 2. SEPARATE PROFILES FOR "SOMEONE ELSE"
+-- ============================================================
 
 CREATE TABLE IF NOT EXISTS public.patient_profiles (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -43,6 +47,11 @@ CREATE TABLE IF NOT EXISTS public.patient_profiles (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+
+-- ============================================================
+-- 3. PATIENT PROFILE PERMISSIONS
+-- ============================================================
+
 GRANT SELECT, INSERT, UPDATE, DELETE
 ON public.patient_profiles
 TO authenticated;
@@ -50,6 +59,11 @@ TO authenticated;
 GRANT ALL
 ON public.patient_profiles
 TO service_role;
+
+
+-- ============================================================
+-- 4. PATIENT PROFILE RLS
+-- ============================================================
 
 ALTER TABLE public.patient_profiles
 ENABLE ROW LEVEL SECURITY;
@@ -61,18 +75,31 @@ CREATE POLICY "Users manage own patient profiles"
 ON public.patient_profiles
 FOR ALL
 TO authenticated
-USING (auth.uid() = owner_user_id)
-WITH CHECK (auth.uid() = owner_user_id);
+USING (
+  auth.uid() = owner_user_id
+)
+WITH CHECK (
+  auth.uid() = owner_user_id
+);
+
+
+-- ============================================================
+-- 5. PATIENT PROFILE INDEXES
+-- ============================================================
 
 CREATE INDEX IF NOT EXISTS patient_profiles_owner_idx
 ON public.patient_profiles (owner_user_id);
 
 CREATE INDEX IF NOT EXISTS patient_profiles_owner_created_idx
-ON public.patient_profiles (owner_user_id, created_at DESC);
+ON public.patient_profiles (
+  owner_user_id,
+  created_at DESC
+);
 
--- ------------------------------------------------------------
--- 3. Add subject ownership to symptom checks
--- ------------------------------------------------------------
+
+-- ============================================================
+-- 6. ADD SUBJECT OWNERSHIP TO SYMPTOM CHECKS
+-- ============================================================
 
 ALTER TABLE public.symptom_checks
   ADD COLUMN IF NOT EXISTS patient_id UUID
@@ -83,9 +110,70 @@ ALTER TABLE public.symptom_checks
   ADD COLUMN IF NOT EXISTS subject_type TEXT
     NOT NULL DEFAULT 'self';
 
--- ------------------------------------------------------------
--- 4. Validate subject type
--- ------------------------------------------------------------
+
+-- ============================================================
+-- 7. ADD HEALTH CONDITION TREND SCORE
+-- ============================================================
+--
+-- IMPORTANT:
+--
+-- This field is intentionally separate from `severity`.
+--
+-- severity:
+--   Existing database compatibility field.
+--   Current application uses it for Symptom Match Strength
+--   (0–100).
+--
+-- health_trend_score:
+--   Separate non-clinical reported-health trend score.
+--   0–100.
+--
+-- Interpretation:
+--   Higher score = better reported condition/trend
+--   Lower score  = worse reported condition/trend
+--
+-- This is NOT:
+--   - disease probability
+--   - diagnostic probability
+--   - clinical risk percentage
+--   - medical diagnosis
+--
+-- It is only a consistent trend indicator derived from
+-- information reported during symptom checks.
+-- ============================================================
+
+ALTER TABLE public.symptom_checks
+  ADD COLUMN IF NOT EXISTS health_trend_score INTEGER;
+
+
+-- ============================================================
+-- 8. VALIDATE HEALTH TREND SCORE
+-- ============================================================
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'symptom_checks_health_trend_score_check'
+  ) THEN
+    ALTER TABLE public.symptom_checks
+      ADD CONSTRAINT symptom_checks_health_trend_score_check
+      CHECK (
+        health_trend_score IS NULL
+        OR (
+          health_trend_score >= 0
+          AND health_trend_score <= 100
+        )
+      );
+  END IF;
+END
+$$;
+
+
+-- ============================================================
+-- 9. VALIDATE SUBJECT TYPE
+-- ============================================================
 
 DO $$
 BEGIN
@@ -96,14 +184,17 @@ BEGIN
   ) THEN
     ALTER TABLE public.symptom_checks
       ADD CONSTRAINT symptom_checks_subject_type_check
-      CHECK (subject_type IN ('self', 'patient'));
+      CHECK (
+        subject_type IN ('self', 'patient')
+      );
   END IF;
 END
 $$;
 
--- ------------------------------------------------------------
--- 5. Keep patient_id consistent with subject_type
--- ------------------------------------------------------------
+
+-- ============================================================
+-- 10. KEEP PATIENT_ID CONSISTENT WITH SUBJECT_TYPE
+-- ============================================================
 
 DO $$
 BEGIN
@@ -115,27 +206,60 @@ BEGIN
     ALTER TABLE public.symptom_checks
       ADD CONSTRAINT symptom_checks_subject_consistency_check
       CHECK (
-        (subject_type = 'self' AND patient_id IS NULL)
+        (
+          subject_type = 'self'
+          AND patient_id IS NULL
+        )
         OR
-        (subject_type = 'patient' AND patient_id IS NOT NULL)
+        (
+          subject_type = 'patient'
+          AND patient_id IS NOT NULL
+        )
       );
   END IF;
 END
 $$;
 
--- ------------------------------------------------------------
--- 6. Indexes
--- ------------------------------------------------------------
+
+-- ============================================================
+-- 11. SYMPTOM HISTORY INDEXES
+-- ============================================================
 
 CREATE INDEX IF NOT EXISTS symptom_checks_patient_created_idx
-ON public.symptom_checks (patient_id, created_at);
+ON public.symptom_checks (
+  patient_id,
+  created_at
+);
 
 CREATE INDEX IF NOT EXISTS symptom_checks_user_subject_created_idx
-ON public.symptom_checks (user_id, subject_type, created_at);
+ON public.symptom_checks (
+  user_id,
+  subject_type,
+  created_at
+);
 
--- ------------------------------------------------------------
--- 7. Replace symptom_checks RLS policies
--- ------------------------------------------------------------
+
+-- ============================================================
+-- 12. HEALTH TREND INDEX
+-- ============================================================
+--
+-- Useful when loading the user's/patient's historical trend.
+-- NULL values are allowed because old records may not have
+-- a health trend score yet.
+-- ============================================================
+
+CREATE INDEX IF NOT EXISTS symptom_checks_user_health_trend_idx
+ON public.symptom_checks (
+  user_id,
+  subject_type,
+  created_at
+)
+WHERE health_trend_score IS NOT NULL;
+
+
+-- ============================================================
+-- 13. REPLACE SYMPTOM CHECKS RLS POLICY
+-- ============================================================
 
 DROP POLICY IF EXISTS "Users manage own checks"
 ON public.symptom_checks;
@@ -183,9 +307,10 @@ WITH CHECK (
   )
 );
 
--- ------------------------------------------------------------
--- 8. Updated-at trigger for patient profiles
--- ------------------------------------------------------------
+
+-- ============================================================
+-- 14. UPDATED-AT FUNCTION FOR PATIENT PROFILES
+-- ============================================================
 
 CREATE OR REPLACE FUNCTION public.set_patient_profile_updated_at()
 RETURNS TRIGGER
@@ -199,6 +324,11 @@ BEGIN
 END;
 $$;
 
+
+-- ============================================================
+-- 15. UPDATED-AT TRIGGER
+-- ============================================================
+
 DROP TRIGGER IF EXISTS patient_profiles_updated_at
 ON public.patient_profiles;
 
@@ -207,17 +337,29 @@ BEFORE UPDATE ON public.patient_profiles
 FOR EACH ROW
 EXECUTE FUNCTION public.set_patient_profile_updated_at();
 
+
+-- ============================================================
+-- 16. PROTECT UPDATED-AT FUNCTION
+-- ============================================================
+
 REVOKE EXECUTE
 ON FUNCTION public.set_patient_profile_updated_at()
 FROM PUBLIC, anon, authenticated;
 
+
 -- ============================================================
--- 9. Prevent reassignment of symptom history
+-- 17. PREVENT SUBJECT REASSIGNMENT
 -- ============================================================
 --
--- A saved symptom check must remain attached to the same subject.
--- This prevents an authenticated user from moving an existing
--- self/patient history record to another subject/patient.
+-- Once a symptom check has been saved:
+--
+-- self -> cannot become patient
+-- patient A -> cannot become patient B
+-- patient -> cannot become self
+--
+-- This protects separation between:
+--   1. Logged-in user's own history
+--   2. Someone Else's patient history
 -- ============================================================
 
 CREATE OR REPLACE FUNCTION public.prevent_symptom_check_subject_change()
@@ -227,15 +369,24 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
+
   IF NEW.subject_type IS DISTINCT FROM OLD.subject_type
-     OR NEW.patient_id IS DISTINCT FROM OLD.patient_id THEN
+     OR NEW.patient_id IS DISTINCT FROM OLD.patient_id
+  THEN
+
     RAISE EXCEPTION
       'The subject of a saved symptom check cannot be changed.';
+
   END IF;
 
   RETURN NEW;
 END;
 $$;
+
+
+-- ============================================================
+-- 18. SUBJECT REASSIGNMENT TRIGGER
+-- ============================================================
 
 DROP TRIGGER IF EXISTS prevent_symptom_check_subject_change
 ON public.symptom_checks;
@@ -245,6 +396,44 @@ BEFORE UPDATE ON public.symptom_checks
 FOR EACH ROW
 EXECUTE FUNCTION public.prevent_symptom_check_subject_change();
 
+
+-- ============================================================
+-- 19. PROTECT SUBJECT REASSIGNMENT FUNCTION
+-- ============================================================
+
 REVOKE EXECUTE
 ON FUNCTION public.prevent_symptom_check_subject_change()
 FROM PUBLIC, anon, authenticated;
+
+
+-- ============================================================
+-- 20. DOCUMENTATION / SEMANTIC SAFETY
+-- ============================================================
+--
+-- The application must keep these meanings separate:
+--
+-- severity
+--   -> Symptom Match Strength (0–100)
+--   -> relative match between reported symptoms and a
+--      candidate explanation.
+--   -> NOT a disease probability.
+--
+-- health_trend_score
+--   -> Reported Health Condition Trend (0–100)
+--   -> higher = better reported condition
+--   -> lower = worse reported condition
+--   -> NOT clinically validated.
+--
+-- subject_type = self
+--   -> patient_id MUST be NULL.
+--
+-- subject_type = patient
+--   -> patient_id MUST point to a patient profile owned
+--      by the authenticated user.
+--
+-- ============================================================
+
+
+-- ============================================================
+-- END OF PATIENT PROFILE / HISTORY SCHEMA
+-- ============================================================
