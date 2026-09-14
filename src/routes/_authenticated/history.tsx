@@ -38,8 +38,12 @@ import type {
 } from "@/lib/history";
 
 import {
-  deleteCheck,
+  historyHealthTrendScore,
   listChecks,
+} from "@/lib/history.functions";
+
+import {
+  deleteCheck,
 } from "@/lib/history.functions";
 
 import {
@@ -89,7 +93,7 @@ export const Route =
             "description",
 
           content:
-            "Review your saved symptom checks and symptom-match trend over time.",
+            "Review your saved self-checks and reported health condition trend over time.",
         },
 
         {
@@ -105,7 +109,7 @@ export const Route =
             "og:description",
 
           content:
-            "Your private symptom-check timeline and symptom-match trend.",
+            "Your private symptom-check timeline and reported health condition trend.",
         },
 
         {
@@ -179,6 +183,7 @@ function HistoryBody() {
     useQuery({
       /*
        * IMPORTANT:
+       *
        * This cache key belongs exclusively to the logged-in user's
        * self-check history.
        *
@@ -202,8 +207,6 @@ function HistoryBody() {
    * patient_id IS NULL
    *
    * The additional client-side filter is intentionally defensive.
-   * It prevents a malformed/legacy record from ever appearing
-   * in the Self History UI.
    */
   const history: HistoryEntry[] =
     useMemo(() => {
@@ -279,6 +282,120 @@ function HistoryBody() {
     ]);
 
   /* ------------------------------------------------------------------------ */
+  /*                     Health Trend History                                 */
+  /* ------------------------------------------------------------------------ */
+
+  /*
+   * IMPORTANT:
+   *
+   * Health Condition Trend is completely separate from
+   * Symptom Match Strength.
+   *
+   * Legacy records with no healthTrendScore are excluded.
+   *
+   * We NEVER fall back to entry.severity here.
+   */
+  const healthTrendHistory =
+    useMemo(() => {
+      return sortedHistory
+        .map(
+          (
+            entry,
+          ) => {
+            const score =
+              historyHealthTrendScore(
+                entry,
+              );
+
+            if (
+              score === null
+            ) {
+              return null;
+            }
+
+            return {
+              entry,
+              score,
+            };
+          },
+        )
+        .filter(
+          (
+            item,
+          ): item is {
+            entry: HistoryEntry;
+            score: number;
+          } =>
+            item !== null,
+        );
+    }, [
+      sortedHistory,
+    ]);
+
+  /* ------------------------------------------------------------------------ */
+  /*                       Latest Health Trend                                */
+  /* ------------------------------------------------------------------------ */
+
+  const latestHealthTrend =
+    healthTrendHistory.length >
+    0
+      ? healthTrendHistory[
+          healthTrendHistory.length -
+            1
+        ]?.score ?? null
+      : null;
+
+  /* ------------------------------------------------------------------------ */
+  /*                      Previous Health Trend                               */
+  /* ------------------------------------------------------------------------ */
+
+  const previousHealthTrend =
+    healthTrendHistory.length >
+    1
+      ? healthTrendHistory[
+          healthTrendHistory.length -
+            2
+        ]?.score ?? null
+      : null;
+
+  /* ------------------------------------------------------------------------ */
+  /*                     Health Trend Direction                               */
+  /* ------------------------------------------------------------------------ */
+
+  const healthTrendDirection =
+    previousHealthTrend ===
+    null ||
+    latestHealthTrend ===
+      null
+      ? "stable"
+      : latestHealthTrend >
+          previousHealthTrend
+        ? "up"
+        : latestHealthTrend <
+            previousHealthTrend
+          ? "down"
+          : "stable";
+
+  /* ------------------------------------------------------------------------ */
+  /*                    Average Health Trend                                  */
+  /* ------------------------------------------------------------------------ */
+
+  const averageHealthTrend =
+    healthTrendHistory.length >
+    0
+      ? healthTrendHistory.reduce(
+          (
+            sum,
+            item,
+          ) =>
+            sum +
+            item.score,
+          0,
+        ) /
+        healthTrendHistory.length
+      : null;
+
+  /* ------------------------------------------------------------------------ */
   /*                         Latest Match Strength                            */
   /* ------------------------------------------------------------------------ */
 
@@ -311,10 +428,10 @@ function HistoryBody() {
       : null;
 
   /* ------------------------------------------------------------------------ */
-  /*                                  Trend                                   */
+  /*                     Match Strength Direction                             */
   /* ------------------------------------------------------------------------ */
 
-  const trend =
+  const matchStrengthTrend =
     previousMatchStrength ===
     null
       ? "stable"
@@ -426,7 +543,8 @@ function HistoryBody() {
 
               <p className="mt-1 text-sm text-muted-foreground">
                 Your saved self-checks and
-                symptom-match trend.
+                reported health condition
+                trend.
               </p>
             </div>
 
@@ -509,7 +627,9 @@ function HistoryBody() {
                 Complete and save a symptom
                 check for yourself. Your
                 saved checks will appear here
-                with a symptom-match trend.
+                with symptom-match and
+                health-condition trend data
+                when available.
               </p>
 
               <Button
@@ -559,32 +679,37 @@ function HistoryBody() {
                 icon={
                   <Activity className="size-5" />
                 }
-                label="Latest match strength"
-                value={`${formatMatchStrength(
-                  latestMatchStrength,
-                )}%`}
+                label="Latest health trend"
+                value={
+                  latestHealthTrend ===
+                  null
+                    ? "No data"
+                    : `${formatHealthTrendScore(
+                        latestHealthTrend,
+                      )}/100`
+                }
               />
 
               <SummaryCard
                 icon={
-                  trend ===
+                  healthTrendDirection ===
                   "up" ? (
                     <TrendingUp className="size-5" />
-                  ) : trend ===
+                  ) : healthTrendDirection ===
                     "down" ? (
                     <TrendingDown className="size-5" />
                   ) : (
                     <Activity className="size-5" />
                   )
                 }
-                label="Recent trend"
+                label="Recent health trend"
                 value={
-                  trend ===
+                  healthTrendDirection ===
                   "up"
-                    ? "Higher"
-                    : trend ===
+                    ? "Better"
+                    : healthTrendDirection ===
                         "down"
-                      ? "Lower"
+                      ? "Worse"
                       : "Stable"
                 }
               />
@@ -592,7 +717,7 @@ function HistoryBody() {
             </section>
 
             {/* ============================================================ */}
-            {/* MATCH GRAPH                                                    */}
+            {/* HEALTH CONDITION TREND GRAPH                                  */}
             {/* ============================================================ */}
 
             <Card className="overflow-hidden">
@@ -604,13 +729,112 @@ function HistoryBody() {
                   <div>
                     <CardTitle className="flex items-center gap-2">
                       <BarChart3 className="size-5" />
-                      Symptom Match Trend
+                      Health Condition Trend
                     </CardTitle>
 
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Match strength recorded
-                      during your saved
-                      self-checks over time.
+                      A non-clinical indicator
+                      based on what you
+                      reported during your
+                      saved self-checks.
+                    </p>
+                  </div>
+
+                  <Badge variant="secondary">
+                    {healthTrendHistory.length}{" "}
+                    {healthTrendHistory.length ===
+                    1
+                      ? "point"
+                      : "points"}
+                  </Badge>
+
+                </div>
+
+              </CardHeader>
+
+              <CardContent className="pt-5">
+
+                {healthTrendHistory.length ===
+                0 ? (
+                  <div className="flex min-h-48 flex-col items-center justify-center rounded-lg border border-dashed px-6 text-center">
+
+                    <Activity className="size-8 text-muted-foreground" />
+
+                    <p className="mt-3 text-sm font-medium">
+                      Health trend data is
+                      not available yet
+                    </p>
+
+                    <p className="mt-1 max-w-md text-xs leading-5 text-muted-foreground">
+                      New saved checks will
+                      appear here after a
+                      Health Condition Trend
+                      score is recorded.
+                    </p>
+
+                  </div>
+                ) : (
+                  <HealthTrendGraph
+                    entries={
+                      healthTrendHistory
+                    }
+                  />
+                )}
+
+                <div className="mt-5 flex items-start justify-between gap-4 text-xs text-muted-foreground">
+
+                  <span>
+                    0 — Worse
+                  </span>
+
+                  <span className="text-center">
+                    Higher = better
+                    reported condition
+                  </span>
+
+                  <span>
+                    100 — Better
+                  </span>
+
+                </div>
+
+                <Separator className="my-5" />
+
+                <div className="rounded-lg bg-muted/50 px-4 py-3 text-xs leading-5 text-muted-foreground">
+                  This graph is a
+                  non-clinical trend indicator
+                  based only on information
+                  reported during your
+                  symptom checks. It is not a
+                  diagnosis, disease probability,
+                  medical risk percentage,
+                  prognosis, or clinically
+                  validated health score.
+                </div>
+
+              </CardContent>
+            </Card>
+
+            {/* ============================================================ */}
+            {/* SYMPTOM MATCH STRENGTH GRAPH                                  */}
+            {/* ============================================================ */}
+
+            <Card className="overflow-hidden">
+
+              <CardHeader className="pb-2">
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <BarChart3 className="size-5" />
+                      Symptom Match Strength
+                    </CardTitle>
+
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      The symptom-match strength
+                      recorded during each saved
+                      self-check.
                     </p>
                   </div>
 
@@ -654,14 +878,13 @@ function HistoryBody() {
                 <Separator className="my-5" />
 
                 <div className="rounded-lg bg-muted/50 px-4 py-3 text-xs leading-5 text-muted-foreground">
-                  This graph shows the
-                  symptom-match strength
-                  recorded during your
-                  saved checks. It is a
-                  history/trend measure and
-                  is not a diagnosis or a
-                  clinically validated
-                  probability.
+                  Symptom Match Strength
+                  describes how strongly the
+                  reported symptoms matched
+                  the conditions considered by
+                  the assessment. It is not a
+                  diagnosis or clinically
+                  validated probability.
                 </div>
 
               </CardContent>
@@ -693,6 +916,22 @@ function HistoryBody() {
                   .
                 </p>
 
+                {averageHealthTrend !==
+                null ? (
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Your average reported
+                    Health Condition Trend
+                    score is{" "}
+                    <span className="font-medium text-foreground">
+                      {formatHealthTrendScore(
+                        averageHealthTrend,
+                      )}
+                      /100
+                    </span>
+                    .
+                  </p>
+                ) : null}
+
               </CardHeader>
 
               <CardContent>
@@ -714,6 +953,11 @@ function HistoryBody() {
                         const matchStrength =
                           normalizeMatchStrength(
                             entry.severity,
+                          );
+
+                        const healthTrend =
+                          historyHealthTrendScore(
+                            entry,
                           );
 
                         return (
@@ -739,15 +983,31 @@ function HistoryBody() {
 
                             </div>
 
-                            <Badge
-                              variant="outline"
-                              className="shrink-0"
-                            >
-                              {formatMatchStrength(
-                                matchStrength,
-                              )}
-                              %
-                            </Badge>
+                            <div className="flex shrink-0 items-center gap-2">
+
+                              <Badge
+                                variant="outline"
+                              >
+                                Match{" "}
+                                {formatMatchStrength(
+                                  matchStrength,
+                                )}
+                                %
+                              </Badge>
+
+                              {healthTrend !==
+                              null ? (
+                                <Badge
+                                  variant="secondary"
+                                >
+                                  Trend{" "}
+                                  {formatHealthTrendScore(
+                                    healthTrend,
+                                  )}
+                                </Badge>
+                              ) : null}
+
+                            </div>
 
                           </div>
                         );
@@ -861,6 +1121,337 @@ function SummaryCard({
 }
 
 /* -------------------------------------------------------------------------- */
+/*                    Health Condition Trend Graph                            */
+/* -------------------------------------------------------------------------- */
+
+function HealthTrendGraph({
+  entries,
+}: {
+  entries: Array<{
+    entry: HistoryEntry;
+    score: number;
+  }>;
+}) {
+  const width =
+    760;
+
+  const height =
+    280;
+
+  const padding = {
+    top: 20,
+    right: 24,
+    bottom: 48,
+    left: 44,
+  };
+
+  const chartWidth =
+    width -
+    padding.left -
+    padding.right;
+
+  const chartHeight =
+    height -
+    padding.top -
+    padding.bottom;
+
+  const points =
+    entries.map(
+      (
+        item,
+        index,
+      ) => {
+
+        const score =
+          normalizeHealthTrendScore(
+            item.score,
+          );
+
+        const x =
+          entries.length ===
+          1
+            ? padding.left +
+              chartWidth /
+                2
+            : padding.left +
+              (index /
+                (entries.length -
+                  1)) *
+                chartWidth;
+
+        /*
+         * IMPORTANT:
+         *
+         * 100 = better = visually higher.
+         * 0 = worse = visually lower.
+         *
+         * Therefore:
+         *
+         * 70 -> 60
+         *
+         * produces a downward line.
+         */
+        const y =
+          padding.top +
+          chartHeight -
+          (score /
+            100) *
+            chartHeight;
+
+        return {
+          x,
+          y,
+          score,
+          entry:
+            item.entry,
+        };
+      },
+    );
+
+  const path =
+    points.length >
+    1
+      ? points
+          .map(
+            (
+              point,
+              index,
+            ) =>
+              index ===
+              0
+                ? `M ${point.x} ${point.y}`
+                : `L ${point.x} ${point.y}`,
+          )
+          .join(
+            " ",
+          )
+      : "";
+
+  const gridValues =
+    [
+      0,
+      20,
+      40,
+      60,
+      80,
+      100,
+    ];
+
+  return (
+    <div className="w-full overflow-x-auto">
+
+      <div className="min-w-[620px]">
+
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="h-auto w-full overflow-visible"
+          role="img"
+          aria-label="Health Condition Trend graph. Higher values indicate better reported condition and lower values indicate worse reported condition."
+        >
+
+          {/* -------------------------------------------------------------- */}
+          {/* Grid                                                            */}
+          {/* -------------------------------------------------------------- */}
+
+          {gridValues.map(
+            (
+              value,
+            ) => {
+
+              const y =
+                padding.top +
+                chartHeight -
+                (value /
+                  100) *
+                  chartHeight;
+
+              return (
+                <g
+                  key={
+                    value
+                  }
+                >
+
+                  <line
+                    x1={
+                      padding.left
+                    }
+                    x2={
+                      width -
+                      padding.right
+                    }
+                    y1={
+                      y
+                    }
+                    y2={
+                      y
+                    }
+                    stroke="currentColor"
+                    strokeOpacity="0.12"
+                    strokeWidth="1"
+                  />
+
+                  <text
+                    x={
+                      padding.left -
+                      10
+                    }
+                    y={
+                      y + 4
+                    }
+                    textAnchor="end"
+                    className="fill-muted-foreground text-[11px]"
+                  >
+                    {
+                      value
+                    }
+                  </text>
+
+                </g>
+              );
+            },
+          )}
+
+          {/* -------------------------------------------------------------- */}
+          {/* Y Axis                                                          */}
+          {/* -------------------------------------------------------------- */}
+
+          <line
+            x1={
+              padding.left
+            }
+            x2={
+              padding.left
+            }
+            y1={
+              padding.top
+            }
+            y2={
+              padding.top +
+              chartHeight
+            }
+            stroke="currentColor"
+            strokeOpacity="0.18"
+          />
+
+          {/* -------------------------------------------------------------- */}
+          {/* X Axis                                                          */}
+          {/* -------------------------------------------------------------- */}
+
+          <line
+            x1={
+              padding.left
+            }
+            x2={
+              width -
+              padding.right
+            }
+            y1={
+              padding.top +
+              chartHeight
+            }
+            y2={
+              padding.top +
+              chartHeight
+            }
+            stroke="currentColor"
+            strokeOpacity="0.18"
+          />
+
+          {/* -------------------------------------------------------------- */}
+          {/* Trend Line                                                       */}
+          {/* -------------------------------------------------------------- */}
+
+          {path ? (
+            <path
+              d={
+                path
+              }
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="text-primary"
+            />
+          ) : null}
+
+          {/* -------------------------------------------------------------- */}
+          {/* Data Points                                                      */}
+          {/* -------------------------------------------------------------- */}
+
+          {points.map(
+            (
+              point,
+              index,
+            ) => (
+              <g
+                key={
+                  point
+                    .entry
+                    .id
+                }
+              >
+
+                <circle
+                  cx={
+                    point.x
+                  }
+                  cy={
+                    point.y
+                  }
+                  r="6"
+                  className="fill-background stroke-primary"
+                  strokeWidth="3"
+                />
+
+                <text
+                  x={
+                    point.x
+                  }
+                  y={
+                    point.y -
+                    12
+                  }
+                  textAnchor="middle"
+                  className="fill-foreground text-[11px] font-medium"
+                >
+                  {formatHealthTrendScore(
+                    point.score,
+                  )}
+                </text>
+
+                <text
+                  x={
+                    point.x
+                  }
+                  y={
+                    height -
+                    20
+                  }
+                  textAnchor="middle"
+                  className="fill-muted-foreground text-[10px]"
+                >
+                  {formatGraphDate(
+                    point
+                      .entry
+                      .date,
+                    index,
+                    entries.length,
+                  )}
+                </text>
+
+              </g>
+            ),
+          )}
+
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /*                         Match Strength Graph                               */
 /* -------------------------------------------------------------------------- */
 
@@ -970,7 +1561,7 @@ function MatchStrengthGraph({
           viewBox={`0 0 ${width} ${height}`}
           className="h-auto w-full overflow-visible"
           role="img"
-          aria-label="Symptom match strength trend graph"
+          aria-label="Symptom Match Strength trend graph"
         >
 
           {/* -------------------------------------------------------------- */}
@@ -1182,6 +1773,8 @@ function MatchStrengthGraph({
 
 /**
  * Normalize any stored match-strength value to 0–100.
+ *
+ * This helper is ONLY for Symptom Match Strength.
  */
 function normalizeMatchStrength(
   value: unknown,
@@ -1207,6 +1800,37 @@ function normalizeMatchStrength(
 }
 
 /**
+ * Normalize Health Condition Trend.
+ *
+ * Higher = better reported condition.
+ * Lower = worse reported condition.
+ */
+function normalizeHealthTrendScore(
+  value: unknown,
+): number {
+  const numeric =
+    Number(value);
+
+  if (
+    !Number.isFinite(
+      numeric,
+    )
+  ) {
+    return 0;
+  }
+
+  return Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(
+        numeric,
+      ),
+    ),
+  );
+}
+
+/**
  * Format match strength without unnecessary decimal places.
  */
 function formatMatchStrength(
@@ -1214,6 +1838,28 @@ function formatMatchStrength(
 ) {
   const safe =
     normalizeMatchStrength(
+      value,
+    );
+
+  return Number.isInteger(
+    safe,
+  )
+    ? String(
+        safe,
+      )
+    : safe.toFixed(
+        1,
+      );
+}
+
+/**
+ * Format Health Condition Trend.
+ */
+function formatHealthTrendScore(
+  value: number,
+) {
+  const safe =
+    normalizeHealthTrendScore(
       value,
     );
 
