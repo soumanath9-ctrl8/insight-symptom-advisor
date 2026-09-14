@@ -39,6 +39,9 @@ import type {
 
 import {
   historyHealthTrendScore,
+} from "@/lib/history";
+
+import {
   listChecks,
 } from "@/lib/history.functions";
 
