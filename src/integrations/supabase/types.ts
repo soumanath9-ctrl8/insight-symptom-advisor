@@ -119,6 +119,7 @@ export type Database = {
           categories: Json
           created_at: string
           duration: string
+          duration: string
           health_trend_score: number | null
           id: string
           next_step: string
