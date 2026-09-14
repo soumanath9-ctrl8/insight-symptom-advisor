@@ -353,18 +353,20 @@ function langLine(
 type SafetyInput = {
   symptoms: string;
 
-  answers?: {
-    question: string;
-    answer: string;
-  }[];
+  answers?:
+    | {
+        question: string;
+        answer: string;
+      }[]
+    | undefined;
 
-  age?: string;
+  age?: string | undefined;
 
-  duration?: string;
+  duration?: string | undefined;
 
-  severity?: number;
+  severity?: number | undefined;
 
-  language?: "en" | "bn";
+  language?: "en" | "bn" | undefined;
 };
 
 /**
