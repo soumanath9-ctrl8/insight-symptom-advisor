@@ -1,11 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-
-/* -------------------------------------------------------------------------- */
-/*                                    Schemas                                 */
-/* -------------------------------------------------------------------------- */
+import { requireSupabaseAuth } from "@/lib/auth.server";
 
 const SubjectTypeSchema = z.enum([
   "self",
@@ -19,216 +15,365 @@ const UrgencySchema = z.enum([
   "emergency",
 ]);
 
-/**
- * Existing database column is named `severity`.
- *
- * In the current SymptomScope architecture this field stores
- * symptom-match strength from 0–100.
- *
- * It is intentionally NOT called probability because it is not
- * a clinically validated probability.
- */
 const MatchStrengthSchema = z
   .number()
   .min(0)
   .max(100);
 
-const SaveCheckSchema = z.object({
-  symptoms: z
-    .string()
-    .min(1)
-    .max(4000),
+const HealthTrendScoreSchema = z
+  .number()
+  .min(0)
+  .max(100)
+  .nullable()
+  .optional();
 
-  /**
-   * Existing DB field name.
+const AnswerSchema = z.object({
+  question: z.string(),
+  answer: z.string(),
+});
+
+const SaveCheckSchema = z.object({
+  symptoms: z.string().min(1).max(2000),
+
+  duration: z
+    .string()
+    .max(100)
+    .optional()
+    .default(""),
+
+  /*
+   * IMPORTANT:
    *
-   * Application meaning:
-   * 0–100 symptom-match strength.
+   * severity is retained for backwards compatibility
+   * and represents Symptom Match Strength (0–100).
+   *
+   * It is NOT a diagnostic probability.
    */
   severity: MatchStrengthSchema
     .optional()
     .default(0),
 
-  urgency: UrgencySchema,
+  /*
+   * NEW:
+   *
+   * Independent 0–100 non-clinical health trend score.
+   *
+   * Higher = better reported health trend.
+   * Lower = worse reported health trend.
+   */
+  healthTrendScore:
+    HealthTrendScoreSchema,
 
-  topCondition: z
-    .string()
-    .max(500)
-    .optional()
-    .default(""),
+  urgency:
+    UrgencySchema
+      .default("self-care"),
 
-  summary: z
-    .string()
-    .max(5000)
-    .optional()
-    .default(""),
+  topCondition:
+    z.string()
+      .max(300)
+      .optional()
+      .default(""),
 
-  answers: z
-    .array(
-      z.object({
-        question: z
-          .string()
-          .max(4000),
+  summary:
+    z.string()
+      .max(4000)
+      .optional()
+      .default(""),
 
-        answer: z
-          .string()
-          .max(4000),
-      }),
-    )
-    .max(6)
-    .optional()
-    .default([]),
+  answers:
+    z.array(AnswerSchema)
+      .max(6)
+      .optional()
+      .default([]),
 
-  redFlag: z
-    .boolean()
-    .optional()
-    .default(false),
+  redFlag:
+    z.boolean()
+      .optional()
+      .default(false),
 
-  redFlags: z
-    .array(
-      z.string().max(2000),
-    )
-    .max(20)
-    .optional()
-    .default([]),
+  redFlags:
+    z.array(z.string())
+      .max(30)
+      .optional()
+      .default([]),
 
-  categories: z
-    .array(
-      z.string().max(500),
-    )
-    .max(20)
-    .optional()
-    .default([]),
+  categories:
+    z.array(z.string())
+      .max(30)
+      .optional()
+      .default([]),
 
-  supportingFactors: z
-    .array(
-      z.object({
-        factor: z
-          .string()
-          .max(1000),
+  supportingFactors:
+    z.array(z.string())
+      .max(30)
+      .optional()
+      .default([]),
 
-        weight: z
-          .number()
-          .optional(),
+  uncertainty:
+    z.string()
+      .max(4000)
+      .optional()
+      .default(""),
 
-        effect: z
-          .string()
-          .max(2000)
-          .optional(),
-      }),
-    )
-    .max(30)
-    .optional()
-    .default([]),
+  nextStep:
+    z.string()
+      .max(4000)
+      .optional()
+      .default(""),
 
-  vitals: z
-    .record(
+  vitals:
+    z.record(
       z.string(),
-      z.number(),
+      z.unknown(),
     )
-    .optional()
-    .nullable(),
+      .optional()
+      .nullable(),
 
-  uncertainty: z
-    .string()
-    .max(5000)
-    .optional()
-    .default(""),
+  subjectType:
+    SubjectTypeSchema
+      .optional()
+      .default("self"),
 
-  nextStep: z
-    .string()
-    .max(5000)
-    .optional()
-    .default(""),
-
-  subjectType: SubjectTypeSchema
-    .optional()
-    .default("self"),
-
-  patientId: z
-    .string()
-    .uuid()
-    .nullable()
-    .optional()
-    .default(null),
+  patientId:
+    z.string()
+      .uuid()
+      .optional()
+      .nullable(),
 });
 
-const DeleteCheckSchema =
-  z.object({
-    id: z.string().uuid(),
-  });
+const PatientIdSchema = z.object({
+  patientId: z.string().uuid(),
+});
 
-const PatientIdSchema =
-  z.object({
-    patientId: z.string().uuid(),
-  });
+export type HistorySubjectType =
+  | "self"
+  | "patient";
 
-/* -------------------------------------------------------------------------- */
-/*                              Returned Types                                */
-/* -------------------------------------------------------------------------- */
+export type Urgency =
+  | "self-care"
+  | "see-a-doctor"
+  | "urgent"
+  | "emergency";
 
 export type HistoryCheck = {
   id: string;
+
   createdAt: string;
-  symptoms: string;
-  severity: number;
-  healthTrendScore: number | null;
-  urgency: Urgency;
-  topCondition: string;
-  summary: string;
-  subjectType: HistorySubjectType;
-  patientId: string | null;
-};
-
-export type HistoryCheck = {
-  id: string;
-
-  date: string;
 
   symptoms: string;
 
-  /**
-   * 0–100 symptom-match strength.
+  duration?: string;
+
+  /*
+   * Existing metric:
+   * Symptom Match Strength.
    */
   severity: number;
 
-  urgency:
-    | "self-care"
-    | "see-a-doctor"
-    | "urgent"
-    | "emergency";
+  /*
+   * New metric:
+   * Health Condition Trend.
+   */
+  healthTrendScore: number | null;
+
+  urgency: Urgency;
 
   topCondition: string;
 
   summary: string;
 
+  answers: AnswerSchema[];
+
+  redFlag: boolean;
+
+  redFlags: string[];
+
+  categories: string[];
+
+  supportingFactors: string[];
+
+  uncertainty: string;
+
+  nextStep: string;
+
+  vitals:
+    Record<string, unknown> | null;
+
   subjectType:
-    | "self"
-    | "patient";
+    HistorySubjectType;
 
   patientId:
-    | string
-    | null;
+    string | null;
 };
 
-export type SavedCheck = {
-  id: string;
-};
+type SupabaseClient = Awaited<
+  ReturnType<typeof requireSupabaseAuth>
+>["supabase"];
 
-/* -------------------------------------------------------------------------- */
-/*                         Internal Helper Functions                          */
-/* -------------------------------------------------------------------------- */
+type AuthUser = Awaited<
+  ReturnType<typeof requireSupabaseAuth>
+>["user"];
 
 /**
- * Verify that a patient belongs to the authenticated user.
+ * Clamp any 0–100 score.
+ */
+function clampScore(
+  value: unknown,
+): number {
+  const numeric =
+    typeof value === "number"
+      ? value
+      : Number(value);
+
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+
+  return Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(numeric),
+    ),
+  );
+}
+
+/**
+ * Convert database row into the application
+ * HistoryCheck shape.
  *
- * This check is deliberately performed server-side and must not trust
- * a patient ID supplied by the client by itself.
+ * IMPORTANT:
+ * health_trend_score is intentionally kept
+ * separate from severity.
+ */
+function mapHistoryRow(
+  row: any,
+): HistoryCheck {
+  return {
+    id: row.id,
+
+    createdAt:
+      row.created_at,
+
+    symptoms:
+      row.symptoms ?? "",
+
+    duration:
+      row.duration ?? "",
+
+    /*
+     * severity = Symptom Match Strength.
+     */
+    severity:
+      clampScore(
+        row.severity,
+      ),
+
+    /*
+     * health_trend_score =
+     * Health Condition Trend.
+     *
+     * NULL means that this is a legacy record
+     * for which no Health Trend was calculated.
+     */
+    healthTrendScore:
+      row.health_trend_score === null ||
+      row.health_trend_score === undefined
+        ? null
+        : clampScore(
+            row.health_trend_score,
+          ),
+
+    urgency:
+      normalizeUrgency(
+        row.urgency,
+      ),
+
+    topCondition:
+      row.top_condition ?? "",
+
+    summary:
+      row.summary ?? "",
+
+    answers:
+      Array.isArray(row.answers)
+        ? row.answers
+        : [],
+
+    redFlag:
+      Boolean(
+        row.red_flag,
+      ),
+
+    redFlags:
+      Array.isArray(row.red_flags)
+        ? row.red_flags
+        : [],
+
+    categories:
+      Array.isArray(row.categories)
+        ? row.categories
+        : [],
+
+    supportingFactors:
+      Array.isArray(
+        row.supporting_factors,
+      )
+        ? row.supporting_factors
+        : [],
+
+    uncertainty:
+      row.uncertainty ?? "",
+
+    nextStep:
+      row.next_step ?? "",
+
+    vitals:
+      row.vitals ?? null,
+
+    subjectType:
+      row.subject_type === "patient"
+        ? "patient"
+        : "self",
+
+    patientId:
+      row.patient_id ?? null,
+  };
+}
+
+/**
+ * Keep urgency values safe when reading
+ * persisted database data.
+ */
+function normalizeUrgency(
+  value: unknown,
+): Urgency {
+  switch (value) {
+    case "emergency":
+      return "emergency";
+
+    case "urgent":
+      return "urgent";
+
+    case "see-a-doctor":
+      return "see-a-doctor";
+
+    case "self-care":
+      return "self-care";
+
+    default:
+      return "self-care";
+  }
+}
+
+/**
+ * Server-side patient ownership verification.
+ *
+ * A patient record must always belong to the
+ * currently authenticated user.
  */
 async function verifyOwnedPatient(
-  supabase: {
-    from: (table: string) => any;
-  },
+  supabase: SupabaseClient,
   userId: string,
   patientId: string,
 ) {
@@ -244,226 +389,116 @@ async function verifyOwnedPatient(
 
   if (error) {
     throw new Error(
-      `Unable to verify patient profile: ${error.message}`,
+      "Unable to verify patient ownership.",
     );
   }
 
   if (!data) {
     throw new Error(
-      "Patient profile was not found or you do not have access to it.",
+      "Patient not found or access denied.",
     );
   }
 
-  return true;
+  return data;
 }
 
 /**
- * Normalize database value into a safe 0–100 match strength.
+ * SELF HISTORY
+ *
+ * Returns ONLY records belonging to the
+ * authenticated user's own self-check history.
+ *
+ * Patient records can never appear here.
  */
-function normalizeMatchStrength(
-  value: unknown,
-): number {
-  const numeric = Number(value);
-
-  if (!Number.isFinite(numeric)) {
-    return 0;
-  }
-
-  return Math.max(
-    0,
-    Math.min(
-      100,
-      Math.round(numeric),
-    ),
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/*                              List Self Checks                              */
-/* -------------------------------------------------------------------------- */
-
 export const listChecks =
   createServerFn({
     method: "GET",
-  })
-    .middleware([
-      requireSupabaseAuth,
-    ])
-    .handler(
-      async ({ context }) => {
-        const userId =
-          context.userId;
+  }).handler(async () => {
+    const {
+      supabase,
+      user,
+    } =
+      await requireSupabaseAuth();
 
-        if (!userId) {
-          throw new Error(
-            "You must be signed in to view your history.",
-          );
-        }
+    const {
+      data,
+      error,
+    } = await supabase
+      .from("symptom_checks")
+      .select("*")
+      .eq(
+        "user_id",
+        user.id,
+      )
+      .eq(
+        "subject_type",
+        "self",
+      )
+      .is(
+        "patient_id",
+        null,
+      )
+      .order(
+        "created_at",
+        {
+          ascending: true,
+        },
+      );
 
-        /*
-         * SELF HISTORY ONLY
-         *
-         * This query intentionally requires:
-         *
-         * subject_type = self
-         * patient_id IS NULL
-         *
-         * Therefore patient history cannot appear here.
-         */
-        const {
-          data,
-          error,
-        } = await context.supabase
-          .from("symptom_checks")
-          .select(
-            [
-              "id",
-              "symptoms",
-              "severity",
-              "urgency",
-              "top_condition",
-              "summary",
-              "subject_type",
-              "patient_id",
-              "created_at",
-            ].join(","),
-          )
-          .eq(
-            "user_id",
-            userId,
-          )
-          .eq(
-            "subject_type",
-            "self",
-          )
-          .is(
-            "patient_id",
-            null,
-          )
-          .order(
-            "created_at",
-            {
-              ascending: true,
-            },
-          );
+    if (error) {
+      throw new Error(
+        `Unable to load self history: ${error.message}`,
+      );
+    }
 
-        if (error) {
-          throw new Error(
-            `Unable to load symptom history: ${error.message}`,
-          );
-        }
-
-        return (
-          data ?? []
-        ).map(
-          (
-            row,
-          ): HistoryCheck => ({
-            id: row.id,
-
-            date:
-              row.created_at,
-
-            symptoms:
-              row.symptoms,
-
-            severity:
-              normalizeMatchStrength(
-                row.severity,
-              ),
-
-            urgency:
-              UrgencySchema.parse(
-                row.urgency,
-              ),
-
-            topCondition:
-              row.top_condition ??
-              "",
-
-            summary:
-              row.summary ??
-              "",
-
-            subjectType:
-              "self",
-
-            patientId:
-              null,
-          }),
-        );
-      },
+    return (data ?? []).map(
+      mapHistoryRow,
     );
+  });
 
-/* -------------------------------------------------------------------------- */
-/*                         List Patient-Specific Checks                       */
-/* -------------------------------------------------------------------------- */
-
+/**
+ * PATIENT HISTORY
+ *
+ * Returns ONLY records belonging to the
+ * requested patient.
+ *
+ * Ownership is verified before querying history.
+ */
 export const listPatientChecks =
   createServerFn({
     method: "GET",
   })
-    .middleware([
-      requireSupabaseAuth,
-    ])
     .inputValidator(
-      (input: unknown) =>
-        PatientIdSchema.parse(
-          input,
-        ),
+      PatientIdSchema,
     )
     .handler(
       async ({
         data,
-        context,
       }) => {
-        const userId =
-          context.userId;
+        const {
+          supabase,
+          user,
+        } =
+          await requireSupabaseAuth();
 
-        if (!userId) {
-          throw new Error(
-            "You must be signed in to view patient history.",
-          );
-        }
+        const patientId =
+          data.patientId;
 
-        /*
-         * First verify ownership of the patient.
-         */
         await verifyOwnedPatient(
-          context.supabase,
-          userId,
-          data.patientId,
+          supabase,
+          user.id,
+          patientId,
         );
 
-        /*
-         * PATIENT HISTORY ONLY
-         *
-         * This query can never return self history because:
-         *
-         * subject_type = patient
-         * patient_id = selected patient
-         */
         const {
-          data: checks,
+          data: rows,
           error,
-        } = await context.supabase
+        } = await supabase
           .from("symptom_checks")
-          .select(
-            [
-              "id",
-              "symptoms",
-              "severity",
-              "urgency",
-              "top_condition",
-              "summary",
-              "subject_type",
-              "patient_id",
-              "created_at",
-            ].join(","),
-          )
+          .select("*")
           .eq(
             "user_id",
-            userId,
+            user.id,
           )
           .eq(
             "subject_type",
@@ -471,7 +506,7 @@ export const listPatientChecks =
           )
           .eq(
             "patient_id",
-            data.patientId,
+            patientId,
           )
           .order(
             "created_at",
@@ -486,396 +521,300 @@ export const listPatientChecks =
           );
         }
 
-        return (
-          checks ?? []
-        ).map(
-          (
-            row,
-          ): HistoryCheck => ({
-            id: row.id,
-
-            date:
-              row.created_at,
-
-            symptoms:
-              row.symptoms,
-
-            severity:
-              normalizeMatchStrength(
-                row.severity,
-              ),
-
-            urgency:
-              UrgencySchema.parse(
-                row.urgency,
-              ),
-
-            topCondition:
-              row.top_condition ??
-              "",
-
-            summary:
-              row.summary ??
-              "",
-
-            subjectType:
-              "patient",
-
-            patientId:
-              data.patientId,
-          }),
+        return (rows ?? []).map(
+          mapHistoryRow,
         );
       },
     );
 
-/* -------------------------------------------------------------------------- */
-/*                              Save Check                                    */
-/* -------------------------------------------------------------------------- */
-
+/**
+ * SAVE CHECK
+ *
+ * Self:
+ *   subject_type = self
+ *   patient_id   = null
+ *
+ * Patient:
+ *   subject_type = patient
+ *   patient_id   = verified owned patient
+ *
+ * The subject can never be switched by this
+ * function.
+ */
 export const saveCheck =
   createServerFn({
     method: "POST",
   })
-    .middleware([
-      requireSupabaseAuth,
-    ])
     .inputValidator(
-      (input: unknown) =>
-        SaveCheckSchema.parse(
-          input,
-        ),
+      SaveCheckSchema,
     )
     .handler(
       async ({
         data,
-        context,
       }) => {
-        const userId =
-          context.userId;
+        const {
+          supabase,
+          user,
+        } =
+          await requireSupabaseAuth();
 
-        if (!userId) {
-          throw new Error(
-            "You must be signed in to save a symptom check.",
+        const parsed =
+          SaveCheckSchema.parse(
+            data,
           );
-        }
 
-        /* ------------------------------------------------------------------ */
-        /*                                SELF                                */
-        /* ------------------------------------------------------------------ */
+        const subjectType =
+          parsed.subjectType ??
+          "self";
+
+        let patientId:
+          | string
+          | null = null;
 
         if (
-          data.subjectType ===
-          "self"
+          subjectType ===
+          "patient"
         ) {
-          /*
-           * A self assessment can NEVER carry a patient ID.
-           */
-          const payload = {
-            user_id:
-              userId,
-
-            symptoms:
-              data.symptoms,
-
-            /*
-             * 0–100 symptom-match strength.
-             */
-            severity:
-              normalizeMatchStrength(
-                data.severity,
-              ),
-
-            urgency:
-              data.urgency,
-
-            top_condition:
-              data.topCondition,
-
-            summary:
-              data.summary,
-
-            answers:
-              data.answers,
-
-            red_flag:
-              data.redFlag,
-
-            red_flags:
-              data.redFlags,
-
-            categories:
-              data.categories,
-
-            supporting_factors:
-              data.supportingFactors,
-
-            vitals:
-              data.vitals ??
-              null,
-
-            uncertainty:
-              data.uncertainty,
-
-            next_step:
-              data.nextStep,
-
-            subject_type:
-              "self",
-
-            patient_id:
-              null,
-          };
-
-          const {
-            data: inserted,
-            error,
-          } =
-            await context.supabase
-              .from(
-                "symptom_checks",
-              )
-              .insert(
-                payload,
-              )
-              .select("id")
-              .single();
-
-          if (error) {
+          if (
+            !parsed.patientId
+          ) {
             throw new Error(
-              `Unable to save symptom check: ${error.message}`,
+              "A patient ID is required for a patient check.",
             );
           }
 
-          return {
-            id:
-              inserted.id,
-          } satisfies SavedCheck;
-        }
-
-        /* ------------------------------------------------------------------ */
-        /*                              PATIENT                               */
-        /* ------------------------------------------------------------------ */
-
-        if (
-          !data.patientId
-        ) {
-          throw new Error(
-            "A patient ID is required when saving a patient assessment.",
+          await verifyOwnedPatient(
+            supabase,
+            user.id,
+            parsed.patientId,
           );
+
+          patientId =
+            parsed.patientId;
         }
 
         /*
-         * Never trust the patient ID from the client.
-         *
-         * Verify that this patient belongs to the authenticated user.
+         * Self records are ALWAYS detached from
+         * patient_profiles.
          */
-        await verifyOwnedPatient(
-          context.supabase,
-          userId,
-          data.patientId,
-        );
+        if (
+          subjectType ===
+          "self"
+        ) {
+          patientId = null;
+        }
 
-        const payload = {
+        const insertPayload = {
           user_id:
-            userId,
+            user.id,
 
           symptoms:
-            data.symptoms,
+            parsed.symptoms
+              .trim(),
+
+          duration:
+            parsed.duration
+              ?.trim() ?? "",
 
           /*
-           * 0–100 symptom-match strength.
+           * Existing field:
+           * Symptom Match Strength.
            */
           severity:
-            normalizeMatchStrength(
-              data.severity,
+            clampScore(
+              parsed.severity,
             ),
 
+          /*
+           * NEW field:
+           * Health Condition Trend.
+           *
+           * NULL is allowed for legacy / emergency
+           * paths where a score was not calculated.
+           */
+          health_trend_score:
+            parsed.healthTrendScore ===
+              null ||
+            parsed.healthTrendScore ===
+              undefined
+              ? null
+              : clampScore(
+                  parsed.healthTrendScore,
+                ),
+
           urgency:
-            data.urgency,
+            parsed.urgency,
 
           top_condition:
-            data.topCondition,
+            parsed.topCondition
+              ?.trim() ?? "",
 
           summary:
-            data.summary,
+            parsed.summary
+              ?.trim() ?? "",
 
           answers:
-            data.answers,
+            parsed.answers ?? [],
 
           red_flag:
-            data.redFlag,
+            Boolean(
+              parsed.redFlag,
+            ),
 
           red_flags:
-            data.redFlags,
+            parsed.redFlags ?? [],
 
           categories:
-            data.categories,
+            parsed.categories ?? [],
 
           supporting_factors:
-            data.supportingFactors,
-
-          vitals:
-            data.vitals ??
-            null,
+            parsed.supportingFactors ??
+            [],
 
           uncertainty:
-            data.uncertainty,
+            parsed.uncertainty
+              ?.trim() ?? "",
 
           next_step:
-            data.nextStep,
+            parsed.nextStep
+              ?.trim() ?? "",
+
+          vitals:
+            parsed.vitals ??
+            null,
 
           subject_type:
-            "patient",
+            subjectType,
 
           patient_id:
-            data.patientId,
+            patientId,
         };
 
         const {
           data: inserted,
           error,
-        } =
-          await context.supabase
-            .from(
-              "symptom_checks",
-            )
-            .insert(
-              payload,
-            )
-            .select("id")
-            .single();
+        } = await supabase
+          .from("symptom_checks")
+          .insert(
+            insertPayload,
+          )
+          .select("id")
+          .single();
 
         if (error) {
           throw new Error(
-            `Unable to save patient symptom check: ${error.message}`,
-          );
-        }
-
-        return {
-          id:
-            inserted.id,
-        } satisfies SavedCheck;
-      },
-    );
-
-/* -------------------------------------------------------------------------- */
-/*                              Delete Check                                  */
-/* -------------------------------------------------------------------------- */
-
-export const deleteCheck =
-  createServerFn({
-    method: "POST",
-  })
-    .middleware([
-      requireSupabaseAuth,
-    ])
-    .inputValidator(
-      (input: unknown) =>
-        DeleteCheckSchema.parse(
-          input,
-        ),
-    )
-    .handler(
-      async ({
-        data,
-        context,
-      }) => {
-        const userId =
-          context.userId;
-
-        if (!userId) {
-          throw new Error(
-            "You must be signed in to delete history.",
+            `Unable to save symptom check: ${error.message}`,
           );
         }
 
         /*
-         * First locate the actual row owned by the current user.
+         * IMPORTANT:
+         *
+         * Return the actual database ID.
+         *
+         * Client code must not assume that a check
+         * was saved before this succeeds.
          */
+        return {
+          id:
+            inserted.id,
+        };
+      },
+    );
+
+/**
+ * DELETE SELF OR PATIENT CHECK
+ *
+ * The check must belong to the authenticated
+ * user.
+ *
+ * Patient records additionally require ownership
+ * of the referenced patient.
+ */
+export const deleteCheck =
+  createServerFn({
+    method: "POST",
+  })
+    .inputValidator(
+      z.object({
+        id: z.string().uuid(),
+      }),
+    )
+    .handler(
+      async ({
+        data,
+      }) => {
+        const {
+          supabase,
+          user,
+        } =
+          await requireSupabaseAuth();
+
         const {
           data: existing,
-          error: lookupError,
-        } =
-          await context.supabase
-            .from(
-              "symptom_checks",
-            )
-            .select(
-              [
-                "id",
-                "user_id",
-                "subject_type",
-                "patient_id",
-              ].join(","),
-            )
-            .eq(
-              "id",
-              data.id,
-            )
-            .eq(
-              "user_id",
-              userId,
-            )
-            .maybeSingle();
+          error:
+            lookupError,
+        } = await supabase
+          .from("symptom_checks")
+          .select(
+            "id,user_id,subject_type,patient_id",
+          )
+          .eq(
+            "id",
+            data.id,
+          )
+          .eq(
+            "user_id",
+            user.id,
+          )
+          .maybeSingle();
 
         if (lookupError) {
           throw new Error(
-            `Unable to verify history entry: ${lookupError.message}`,
+            `Unable to find symptom check: ${lookupError.message}`,
           );
         }
 
         if (!existing) {
           throw new Error(
-            "History entry was not found or you do not have permission to delete it.",
+            "Symptom check not found or access denied.",
           );
         }
 
         /*
-         * Patient history must still point to a patient owned
-         * by the authenticated user.
+         * Additional server-side patient ownership
+         * verification.
          */
         if (
           existing.subject_type ===
-          "patient"
+            "patient" &&
+          existing.patient_id
         ) {
-          if (
-            !existing.patient_id
-          ) {
-            throw new Error(
-              "This patient history entry is invalid because it has no patient ID.",
-            );
-          }
-
           await verifyOwnedPatient(
-            context.supabase,
-            userId,
+            supabase,
+            user.id,
             existing.patient_id,
           );
         }
 
-        /*
-         * Owner-scoped DELETE.
-         */
         const {
-          error: deleteError,
-        } =
-          await context.supabase
-            .from(
-              "symptom_checks",
-            )
-            .delete()
-            .eq(
-              "id",
-              data.id,
-            )
-            .eq(
-              "user_id",
-              userId,
-            );
+          error:
+            deleteError,
+        } = await supabase
+          .from("symptom_checks")
+          .delete()
+          .eq(
+            "id",
+            data.id,
+          )
+          .eq(
+            "user_id",
+            user.id,
+          );
 
         if (deleteError) {
           throw new Error(
-            `Unable to delete history entry: ${deleteError.message}`,
+            `Unable to delete symptom check: ${deleteError.message}`,
           );
         }
 
@@ -886,147 +825,109 @@ export const deleteCheck =
       },
     );
 
-/* -------------------------------------------------------------------------- */
-/*                              Self Profile                                  */
-/* -------------------------------------------------------------------------- */
-
+/**
+ * Get the authenticated user's basic profile.
+ *
+ * This is intentionally separate from patient
+ * profiles.
+ */
 export const getProfile =
   createServerFn({
     method: "GET",
-  })
-    .middleware([
-      requireSupabaseAuth,
-    ])
-    .handler(
-      async ({
-        context,
-      }) => {
-        const userId =
-          context.userId;
+  }).handler(async () => {
+    const {
+      supabase,
+      user,
+    } =
+      await requireSupabaseAuth();
 
-        if (!userId) {
-          throw new Error(
-            "You must be signed in to view your profile.",
-          );
-        }
+    const {
+      data,
+      error,
+    } = await supabase
+      .from("profiles")
+      .select(
+        `
+          id,
+          name,
+          age,
+          sex
+        `,
+      )
+      .eq(
+        "id",
+        user.id,
+      )
+      .maybeSingle();
 
-        const {
-          data,
-          error,
-        } =
-          await context.supabase
-            .from(
-              "profiles",
-            )
-            .select(
-              "id,name,age,sex",
-            )
-            .eq(
-              "id",
-              userId,
-            )
-            .maybeSingle();
+    if (error) {
+      throw new Error(
+        `Unable to load profile: ${error.message}`,
+      );
+    }
 
-        if (error) {
-          throw new Error(
-            `Unable to load profile: ${error.message}`,
-          );
-        }
-
-        return {
-          id:
-            data?.id ??
-            userId,
-
-          name:
-            data?.name ??
-            "",
-
-          age:
-            data?.age !==
-              null &&
-            data?.age !==
-              undefined
-              ? String(
-                  data.age,
-                )
-              : "",
-
-          sex:
-            data?.sex ??
-            "",
-        };
-      },
+    return (
+      data ?? {
+        id: user.id,
+        name: "",
+        age: null,
+        sex: null,
+      }
     );
+  });
 
-/* -------------------------------------------------------------------------- */
-/*                       Patient History Count                                */
-/* -------------------------------------------------------------------------- */
-
+/**
+ * Count checks belonging to one patient.
+ *
+ * Ownership is verified first.
+ */
 export const getPatientHistoryCount =
   createServerFn({
     method: "GET",
   })
-    .middleware([
-      requireSupabaseAuth,
-    ])
     .inputValidator(
-      (input: unknown) =>
-        PatientIdSchema.parse(
-          input,
-        ),
+      PatientIdSchema,
     )
     .handler(
       async ({
         data,
-        context,
       }) => {
-        const userId =
-          context.userId;
+        const {
+          supabase,
+          user,
+        } =
+          await requireSupabaseAuth();
 
-        if (!userId) {
-          throw new Error(
-            "You must be signed in to view patient history.",
-          );
-        }
-
-        /*
-         * Verify patient ownership before exposing count.
-         */
         await verifyOwnedPatient(
-          context.supabase,
-          userId,
+          supabase,
+          user.id,
           data.patientId,
         );
 
         const {
           count,
           error,
-        } =
-          await context.supabase
-            .from(
-              "symptom_checks",
-            )
-            .select(
-              "id",
-              {
-                count:
-                  "exact",
-                head: true,
-              },
-            )
-            .eq(
-              "user_id",
-              userId,
-            )
-            .eq(
-              "subject_type",
-              "patient",
-            )
-            .eq(
-              "patient_id",
-              data.patientId,
-            );
+        } = await supabase
+          .from("symptom_checks")
+          .select(
+            "id",
+            {
+              count: "exact",
+              head: true,
+            },
+          )
+          .eq(
+            "user_id",
+            user.id,
+          )
+          .eq(
+            "subject_type",
+            "patient",
+          )
+          .eq(
+            "patient_id",
+            data.patientId,
+          );
 
         if (error) {
           throw new Error(
