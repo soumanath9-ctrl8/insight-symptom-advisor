@@ -170,6 +170,10 @@ const AssessmentSchema = z.object({
   nextStep: z.string().default(""),
 });
 
+export type AssessmentResult = Assessment & {
+  healthTrendScore: number;
+};
+
 const ClarificationSchema = z.object({
   clarification: z
     .object({
