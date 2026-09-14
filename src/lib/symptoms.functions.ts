@@ -207,7 +207,9 @@ export type Urgency =
 export type FollowUpQuestion =
   z.infer<
     typeof QuestionsSchema
-  >["questions"][number];
+  >["questions"][number] & {
+    id: string;
+  };
 
 export type Condition =
   Omit<
@@ -970,7 +972,10 @@ export const getFollowUpQuestions =
 
         return QuestionsSchema.parse(
           raw,
-        ).questions;
+        ).questions.map((question, index) => ({
+          ...question,
+          id: `question-${index + 1}`,
+        }));
       },
     );
 
@@ -1086,7 +1091,10 @@ export const getPatientFollowUpQuestions =
 
         return QuestionsSchema.parse(
           raw,
-        ).questions;
+        ).questions.map((question, index) => ({
+          ...question,
+          id: `question-${index + 1}`,
+        }));
       },
     );
 
@@ -1988,9 +1996,16 @@ export const assessSymptoms =
          * It must NOT be allowed to remove the
          * deterministic safety override.
          */
-        validateAssessment(
+        assessment = validateAssessment({
           assessment,
-        );
+          redFlagLevel: safety.level,
+          redFlagMessages: safety.hits.map((hit) => hit.message),
+          language: data.language,
+          ...(data.age !== undefined ? { age: data.age } : {}),
+          hasUnknownHistory: false,
+          contradictionUnresolved: false,
+          worseningOverride: worsening,
+        }).assessment as Assessment;
 
         return assessment;
       },
@@ -2187,9 +2202,19 @@ export const assessPatientSymptoms =
             data.language,
           );
 
-        validateAssessment(
+        assessment = validateAssessment({
           assessment,
-        );
+          redFlagLevel: safety.level,
+          redFlagMessages: safety.hits.map((hit) => hit.message),
+          language: data.language,
+          ...(profile.age !== null ? { age: profile.age } : {}),
+          hasUnknownHistory:
+            !profile.allergies?.trim() ||
+            !profile.existing_conditions?.trim() ||
+            !profile.current_medications?.trim(),
+          contradictionUnresolved: false,
+          worseningOverride: worsening,
+        }).assessment as Assessment;
 
         return assessment;
       },
@@ -2656,9 +2681,6 @@ export function calculateHealthTrendFromAssessment(
 ): number {
   return calculateHealthTrendScore(
     {
-      severity:
-        input.severity,
-
       urgency:
         input.assessment
           .urgency,
@@ -2667,8 +2689,13 @@ export function calculateHealthTrendFromAssessment(
         input.safety.hits
           .length,
 
-      worsening:
-        input.worsening,
+      ...(input.severity !== undefined
+        ? { severity: input.severity }
+        : {}),
+
+      ...(input.worsening !== undefined
+        ? { worsening: input.worsening }
+        : {}),
     },
   );
 }

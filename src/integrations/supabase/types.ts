@@ -118,6 +118,7 @@ export type Database = {
           answers: Json
           categories: Json
           created_at: string
+          health_trend_score: number | null
           id: string
           next_step: string
           patient_id: string | null
@@ -138,6 +139,7 @@ export type Database = {
           answers?: Json
           categories?: Json
           created_at?: string
+          health_trend_score?: number | null
           id?: string
           next_step?: string
           patient_id?: string | null
@@ -158,6 +160,7 @@ export type Database = {
           answers?: Json
           categories?: Json
           created_at?: string
+          health_trend_score?: number | null
           id?: string
           next_step?: string
           patient_id?: string | null

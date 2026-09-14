@@ -403,7 +403,9 @@ function AppBody() {
 
       supportingFactors:
         assessment.conditions[0]
-          ?.contributingFactors ?? [],
+          ?.contributingFactors.map(
+            (factor) => factor.factor,
+          ) ?? [],
 
       vitals,
 

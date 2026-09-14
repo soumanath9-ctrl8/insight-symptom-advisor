@@ -179,11 +179,6 @@ function PatientChecker({
       getPatient,
     );
 
-  const emergencyFn =
-    useServerFn(
-      immediateEmergencyAssessment,
-    );
-
   const questionsFn =
     useServerFn(
       getPatientFollowUpQuestions,
@@ -495,9 +490,9 @@ function PatientChecker({
             }[];
           },
         ) =>
-          emergencyFn({
-            data: input,
-          }),
+          Promise.resolve(
+            immediateEmergencyAssessment(input),
+          ),
     });
 
   /* ------------------------------------------------------------------------ */
@@ -605,9 +600,9 @@ function PatientChecker({
               symptoms:
                 symptoms.trim(),
 
-              duration:
-                duration.trim() ||
-                undefined,
+              ...(duration.trim()
+                ? { duration: duration.trim() }
+                : {}),
 
               severity:
                 savedMatchStrength,
@@ -624,25 +619,29 @@ function PatientChecker({
                 "",
 
               redFlag:
-                Boolean(
-                  result.redFlag,
-                ),
+                result.redFlags.length > 0,
 
               redFlags:
                 result.redFlags ??
                 [],
 
               categories:
-                result.categories ??
-                [],
+                result.conditions.map(
+                  (condition) => condition.name,
+                ),
 
               supportingFactors:
-                result.supportingFactors ??
-                [],
+                result.conditions[0]
+                  ?.contributingFactors.map(
+                    (factor) => factor.factor,
+                  ) ?? [],
 
               uncertainty:
-                result.uncertainty ??
-                "",
+                `${result.confidence}${
+                  result.confidenceNote
+                    ? ` — ${result.confidenceNote}`
+                    : ""
+                }`,
 
               nextStep:
                 result.nextStep ??
@@ -745,9 +744,9 @@ function PatientChecker({
             symptoms:
               symptoms.trim(),
 
-            duration:
-              duration.trim() ||
-              undefined,
+            ...(duration.trim()
+              ? { duration: duration.trim() }
+              : {}),
 
             language:
               lang === "bn"
@@ -785,8 +784,7 @@ function PatientChecker({
         await questionsMutation.mutateAsync();
 
       const nextQuestions =
-        result?.questions ??
-        [];
+        result ?? [];
 
       if (
         nextQuestions.length ===
@@ -902,9 +900,9 @@ function PatientChecker({
             symptoms:
               symptoms.trim(),
 
-            duration:
-              duration.trim() ||
-              undefined,
+            ...(duration.trim()
+              ? { duration: duration.trim() }
+              : {}),
 
             language:
               lang === "bn"
@@ -1817,10 +1815,10 @@ function PatientResult({
                     }
                   </h2>
 
-                  {topCondition.description ? (
+                      {topCondition.explanation ? (
                     <p className="mt-1 text-sm leading-6 text-muted-foreground">
                       {
-                        topCondition.description
+                          topCondition.explanation
                       }
                     </p>
                   ) : null}
@@ -1863,7 +1861,7 @@ function PatientResult({
           {/* Supporting Factors                                              */}
           {/* -------------------------------------------------------------- */}
 
-          {assessment.supportingFactors?.length ? (
+          {assessment.conditions[0]?.contributingFactors.length ? (
             <div>
 
               <h2 className="text-lg font-semibold">
@@ -1872,20 +1870,20 @@ function PatientResult({
 
               <ul className="mt-3 space-y-2">
 
-                {assessment.supportingFactors.map(
+                {assessment.conditions[0].contributingFactors.map(
                   (
                     factor,
                     index,
                   ) => (
                     <li
-                      key={`${factor}-${index}`}
+                      key={`${factor.factor}-${index}`}
                       className="flex gap-2 text-sm leading-6 text-muted-foreground"
                     >
                       <span className="mt-2 size-1.5 shrink-0 rounded-full bg-primary" />
 
                       <span>
                         {
-                          factor
+                          factor.factor
                         }
                       </span>
                     </li>
