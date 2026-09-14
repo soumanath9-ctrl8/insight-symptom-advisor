@@ -1388,3 +1388,179 @@ export type {
   RedFlagResult,
   Vitals,
 };
+
+// ============================================================
+// SymptomScope — Reported Health Condition Trend
+// ============================================================
+//
+// IMPORTANT:
+// This score is NOT:
+// - a diagnosis
+// - disease probability
+// - clinical risk percentage
+// - a medically validated health score
+//
+// It is a consistent 0–100 trend indicator based on information
+// reported during the symptom check.
+//
+// Higher score = better reported condition
+// Lower score  = worse reported condition
+//
+// This is intentionally separate from `likelihood`.
+// `likelihood` remains Symptom Match Strength.
+// ============================================================
+
+export type HealthTrendUrgency =
+  | "self-care"
+  | "see-a-doctor"
+  | "urgent"
+  | "emergency";
+
+export type HealthTrendInput = {
+  severity?: number;
+  urgency: HealthTrendUrgency;
+  redFlagCount?: number;
+  worsening?: boolean;
+};
+
+/**
+ * Converts the user's self-reported symptom severity into a
+ * non-clinical 0–100 health-trend score.
+ *
+ * Severity:
+ *   1 = very mild
+ *   10 = extremely severe
+ *
+ * This creates a stable baseline before urgency/red-flag
+ * adjustments are applied.
+ */
+function severityBaseline(
+  severity?: number,
+): number {
+  if (
+    typeof severity !== "number" ||
+    !Number.isFinite(severity)
+  ) {
+    // No self-rated severity supplied.
+    // Start from a neutral midpoint rather than pretending
+    // that missing information means either good or bad health.
+    return 70;
+  }
+
+  const normalized = Math.max(
+    1,
+    Math.min(10, Math.round(severity)),
+  );
+
+  /**
+   * 1  -> 92
+   * 2  -> 84
+   * 3  -> 76
+   * 4  -> 68
+   * 5  -> 60
+   * 6  -> 52
+   * 7  -> 44
+   * 8  -> 36
+   * 9  -> 28
+   * 10 -> 20
+   *
+   * This is deliberately a trend scale, not a clinical scale.
+   */
+  return 100 - normalized * 8;
+}
+
+/**
+ * Urgency adjustment.
+ *
+ * Emergency and urgent states must have a clearly lower
+ * reported-condition score than routine/self-care states.
+ *
+ * NOTE:
+ * Urgent != Emergency.
+ */
+function urgencyPenalty(
+  urgency: HealthTrendUrgency,
+): number {
+  switch (urgency) {
+    case "self-care":
+      return 0;
+
+    case "see-a-doctor":
+      return 6;
+
+    case "urgent":
+      return 18;
+
+    case "emergency":
+      return 45;
+
+    default:
+      return 0;
+  }
+}
+
+/**
+ * Red-flag adjustment.
+ *
+ * Red flags affect the trend score, but this score must never
+ * override the authoritative emergency/triage logic.
+ */
+function redFlagPenalty(
+  redFlagCount: number,
+): number {
+  const count = Math.max(
+    0,
+    Math.floor(
+      Number.isFinite(redFlagCount)
+        ? redFlagCount
+        : 0,
+    ),
+  );
+
+  return Math.min(
+    30,
+    count * 10,
+  );
+}
+
+/**
+ * Worsening symptoms receive a modest additional penalty.
+ *
+ * This is deliberately smaller than urgency/red-flag penalties.
+ */
+function worseningPenalty(
+  worsening: boolean,
+): number {
+  return worsening ? 8 : 0;
+}
+
+/**
+ * Calculate the reported health-condition trend score.
+ *
+ * Higher = better reported condition
+ * Lower  = worse reported condition
+ */
+export function calculateHealthTrendScore(
+  input: HealthTrendInput,
+): number {
+  const baseline =
+    severityBaseline(input.severity);
+
+  const score =
+    baseline -
+    urgencyPenalty(input.urgency) -
+    redFlagPenalty(
+      input.redFlagCount ?? 0,
+    ) -
+    worseningPenalty(
+      Boolean(input.worsening),
+    );
+
+  return Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(score),
+    ),
+  );
+}
