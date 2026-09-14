@@ -208,6 +208,8 @@ export type HistoryCheck = {
 
   createdAt: string;
 
+  date: string;
+
   symptoms: string;
 
   duration?: string;
@@ -263,7 +265,7 @@ export type HistoryCheck = {
   nextStep: string;
 
   vitals:
-    Record<string, unknown> | null;
+    Json | null;
 
   subjectType:
     HistorySubjectType;
@@ -336,6 +338,9 @@ function mapHistoryRow(
       row.id,
 
     createdAt:
+      row.created_at,
+
+    date:
       row.created_at,
 
     symptoms:
