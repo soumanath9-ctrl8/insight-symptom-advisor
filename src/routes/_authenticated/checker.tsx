@@ -20,6 +20,7 @@ import {
 
 import {
   assessSymptoms,
+  calculateHealthTrendScore,
   clarifyAnswers,
   getFollowUpQuestions,
   immediateEmergencyAssessment,
