@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/lib/auth.server";
+import type { Json } from "@/integrations/supabase/types";
 
 /* -------------------------------------------------------------------------- */
 /*                                  Schemas                                   */
