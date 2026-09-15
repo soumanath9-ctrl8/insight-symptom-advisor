@@ -910,7 +910,7 @@ function PatientHistoryPage() {
                * 1 Health Condition Trend graph
                * 1 Symptom Match Strength graph
                * 0 AI Risk graphs
-               */
+               */}
 
               <SymptomTimeline
                 entries={history}
