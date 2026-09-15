@@ -119,7 +119,11 @@ function PatientsPage() {
     useState<string | null>(null);
 
   /* ==============================================================
-     LOAD PATIENT PROFILES
+     LOAD ONLY THE CURRENT USER'S PATIENT PROFILES
+     
+     IMPORTANT:
+     listPatientProfiles() is server-authenticated and owner-scoped.
+     This page never requests another user's patients.
   ============================================================== */
 
   const patientsQuery = useQuery({
@@ -157,8 +161,9 @@ function PatientsPage() {
 
   function openCreateForm() {
     setEditingPatient(null);
-    setForm(EMPTY_FORM);
+    setForm({ ...EMPTY_FORM });
     setFormError(null);
+    setDeleteError(null);
     setShowForm(true);
   }
 
@@ -168,7 +173,7 @@ function PatientsPage() {
 
   function openEditForm(patient: PatientProfile) {
     const hasPreviousIllness =
-      !!patient.previousMajorIllnesses?.trim();
+      Boolean(patient.previousMajorIllnesses?.trim());
 
     setEditingPatient(patient);
 
@@ -199,6 +204,10 @@ function PatientsPage() {
       familyHistory:
         patient.familyHistory ?? "",
 
+      /*
+       * Pregnancy is meaningful only for Female patients.
+       * Never hydrate a Male patient with pregnancy data.
+       */
       pregnancyStatus:
         patient.sex === "Female"
           ? patient.pregnancyStatus ?? ""
@@ -206,6 +215,7 @@ function PatientsPage() {
     });
 
     setFormError(null);
+    setDeleteError(null);
     setShowForm(true);
   }
 
@@ -216,7 +226,7 @@ function PatientsPage() {
   function closeForm() {
     setShowForm(false);
     setEditingPatient(null);
-    setForm(EMPTY_FORM);
+    setForm({ ...EMPTY_FORM });
     setFormError(null);
   }
 
@@ -225,11 +235,28 @@ function PatientsPage() {
   ============================================================== */
 
   const canSubmit = useMemo(() => {
-    if (!form.name.trim()) {
+    const trimmedName = form.name.trim();
+
+    const trimmedAge = form.age.trim();
+
+    if (!trimmedName) {
       return false;
     }
 
-    if (!form.age.trim()) {
+    if (!trimmedAge) {
+      return false;
+    }
+
+    /*
+     * Age must be a real number within the UI-supported range.
+     */
+    const numericAge = Number(trimmedAge);
+
+    if (
+      !Number.isFinite(numericAge) ||
+      numericAge < 0 ||
+      numericAge > 120
+    ) {
       return false;
     }
 
@@ -257,6 +284,10 @@ function PatientsPage() {
       return false;
     }
 
+    /*
+     * If Previous Major Illnesses = Yes,
+     * the actual illness description is mandatory.
+     */
     if (
       form.previousIllnessAnswer === "Yes" &&
       !form.previousMajorIllnesses.trim()
@@ -264,6 +295,9 @@ function PatientsPage() {
       return false;
     }
 
+    /*
+     * Pregnancy is mandatory only when Sex = Female.
+     */
     if (
       form.sex === "Female" &&
       !form.pregnancyStatus
@@ -276,6 +310,12 @@ function PatientsPage() {
 
   /* ==============================================================
      SAVE PATIENT PROFILE
+     
+     SECURITY:
+     - The client does NOT provide owner_user_id.
+     - Server function obtains authenticated user.
+     - Update uses patient ID + authenticated owner.
+     - Create assigns authenticated owner on the server.
   ============================================================== */
 
   const saveMutation = useMutation({
@@ -288,10 +328,29 @@ function PatientsPage() {
         );
       }
 
-      const payload = {
-        name: form.name.trim(),
+      const trimmedName = form.name.trim();
+      const trimmedAge = form.age.trim();
 
-        age: form.age.trim(),
+      const numericAge = Number(trimmedAge);
+
+      if (
+        !Number.isFinite(numericAge) ||
+        numericAge < 0 ||
+        numericAge > 120
+      ) {
+        throw new Error(
+          "Please enter a valid age between 0 and 120.",
+        );
+      }
+
+      /*
+       * Keep the stored representation compatible with the
+       * existing profile contract.
+       */
+      const payload = {
+        name: trimmedName,
+
+        age: trimmedAge,
 
         sex: form.sex as Sex,
 
@@ -303,6 +362,12 @@ function PatientsPage() {
         currentMedications:
           form.currentMedications.trim(),
 
+        /*
+         * The database field contains the illness detail.
+         *
+         * "No" -> empty string
+         * "Yes" -> actual illness description
+         */
         previousMajorIllnesses:
           form.previousIllnessAnswer === "Yes"
             ? form.previousMajorIllnesses.trim()
@@ -314,6 +379,9 @@ function PatientsPage() {
         familyHistory:
           form.familyHistory.trim(),
 
+        /*
+         * Never send pregnancy information for a Male patient.
+         */
         pregnancyStatus:
           form.sex === "Female"
             ? (form.pregnancyStatus as YesNo)
@@ -342,10 +410,40 @@ function PatientsPage() {
       });
     },
 
-    onSuccess: () => {
-      queryClient.invalidateQueries({
+    onSuccess: async (result) => {
+      /*
+       * Refresh the patient list after a successful server mutation.
+       */
+      await queryClient.invalidateQueries({
         queryKey: ["patient-profiles"],
       });
+
+      /*
+       * If a patient was being edited, refresh that patient's
+       * profile/history-related cached data as well.
+       *
+       * This does NOT mix histories. These are still patient-specific
+       * query keys.
+       */
+      if (editingPatient?.id) {
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: ["patient", editingPatient.id],
+          }),
+
+          queryClient.invalidateQueries({
+            queryKey: [
+              "patient-checks",
+              editingPatient.id,
+            ],
+          }),
+        ]);
+      }
+
+      /*
+       * Do not close the form until the mutation itself succeeded.
+       */
+      void result;
 
       closeForm();
     },
@@ -361,11 +459,21 @@ function PatientsPage() {
 
   /* ==============================================================
      DELETE PATIENT PROFILE
+     
+     IMPORTANT:
+     deletePatientProfile() is owner-scoped server-side.
+     The client cannot choose another account as owner.
   ============================================================== */
 
   const deleteMutation = useMutation({
     mutationFn: async (patientId: string) => {
       setDeleteError(null);
+
+      if (!patientId.trim()) {
+        throw new Error(
+          "A valid patient profile is required.",
+        );
+      }
 
       return deletePatientProfile({
         data: {
@@ -374,12 +482,35 @@ function PatientsPage() {
       });
     },
 
-    onSuccess: () => {
-      queryClient.invalidateQueries({
+    onSuccess: async (_, patientId) => {
+      /*
+       * Refresh only the current user's patient-profile collection.
+       */
+      await queryClient.invalidateQueries({
         queryKey: ["patient-profiles"],
       });
 
+      /*
+       * Remove/invalidate only the deleted patient's cached data.
+       * This does not touch self history or another patient's history.
+       */
+      queryClient.removeQueries({
+        queryKey: ["patient", patientId],
+      });
+
+      queryClient.removeQueries({
+        queryKey: ["patient-checks", patientId],
+      });
+
       setDeleteError(null);
+
+      /*
+       * If the deleted patient happened to be open in the form,
+       * close it so stale patient data is not displayed.
+       */
+      if (editingPatient?.id === patientId) {
+        closeForm();
+      }
     },
 
     onError: (error) => {
@@ -396,6 +527,14 @@ function PatientsPage() {
   ============================================================== */
 
   function handleDelete(patient: PatientProfile) {
+    if (!patient.id) {
+      setDeleteError(
+        "Unable to delete this patient profile.",
+      );
+
+      return;
+    }
+
     const confirmed = window.confirm(
       `Delete the profile for ${patient.name}? This will also remove access to this patient's stored symptom history from your account.`,
     );
@@ -405,6 +544,27 @@ function PatientsPage() {
     }
 
     deleteMutation.mutate(patient.id);
+  }
+
+  /* ==============================================================
+     OPEN PATIENT CHECKER
+     
+     IMPORTANT:
+     This always uses the selected patient's ID.
+     It never redirects to the self checker.
+  ============================================================== */
+
+  function handleCheckSymptoms(patientId: string) {
+    if (!patientId) {
+      return;
+    }
+
+    navigate({
+      to: "/patient-checker/$patient_ID",
+      params: {
+        patient_ID: patientId,
+      },
+    });
   }
 
   /* ==============================================================
@@ -497,7 +657,13 @@ function PatientsPage() {
             </div>
           </div>
 
-          <Button onClick={openCreateForm}>
+          <Button
+            onClick={openCreateForm}
+            disabled={
+              saveMutation.isPending ||
+              deleteMutation.isPending
+            }
+          >
             <Plus className="mr-2 size-4" />
 
             Add Patient
@@ -550,7 +716,7 @@ function PatientsPage() {
             error={formError}
             saving={saveMutation.isPending}
             canSubmit={canSubmit}
-            editing={!!editingPatient}
+            editing={Boolean(editingPatient)}
             onChange={updateField}
             onSubmit={() =>
               saveMutation.mutate()
@@ -583,6 +749,10 @@ function PatientsPage() {
                 <Button
                   className="mt-5"
                   onClick={openCreateForm}
+                  disabled={
+                    saveMutation.isPending ||
+                    deleteMutation.isPending
+                  }
                 >
                   <Plus className="mr-2 size-4" />
 
@@ -601,6 +771,9 @@ function PatientsPage() {
                     deleteMutation.variables ===
                       patient.id
                   }
+                  editing={
+                    editingPatient?.id === patient.id
+                  }
                   onEdit={() =>
                     openEditForm(patient)
                   }
@@ -608,12 +781,9 @@ function PatientsPage() {
                     handleDelete(patient)
                   }
                   onCheckSymptoms={() =>
-                    navigate({
-                      to: "/patient-checker/$patient_ID",
-                      params: {
-                        patient_ID: patient.id,
-                      },
-                    })
+                    handleCheckSymptoms(
+                      patient.id,
+                    )
                   }
                 />
               ))}
@@ -719,6 +889,8 @@ function PatientProfileForm({
                     )
                   }
                   placeholder="Patient's full name"
+                  disabled={saving}
+                  autoComplete="off"
                 />
               </div>
 
@@ -734,6 +906,7 @@ function PatientProfileForm({
                   type="number"
                   min="0"
                   max="120"
+                  step="1"
                   value={form.age}
                   onChange={(event) =>
                     onChange(
@@ -742,6 +915,8 @@ function PatientProfileForm({
                     )
                   }
                   placeholder="Age"
+                  disabled={saving}
+                  inputMode="numeric"
                 />
               </div>
 
@@ -755,6 +930,7 @@ function PatientProfileForm({
                 <select
                   id="patient-sex"
                   value={form.sex}
+                  disabled={saving}
                   onChange={(event) => {
                     const value =
                       event.target.value as
@@ -770,11 +946,9 @@ function PatientProfileForm({
                      * Pregnancy status is only relevant
                      * for Female patients.
                      *
-                     * If sex changes to Male, remove
-                     * any previously selected pregnancy
-                     * value from the local form.
+                     * If sex changes to Male, immediately
+                     * clear pregnancy state from the form.
                      */
-
                     if (value !== "Female") {
                       onChange(
                         "pregnancyStatus",
@@ -782,7 +956,7 @@ function PatientProfileForm({
                       );
                     }
                   }}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <option value="">
                     Select sex
@@ -821,6 +995,7 @@ function PatientProfileForm({
                 <select
                   id="patient-allergies"
                   value={form.allergies}
+                  disabled={saving}
                   onChange={(event) =>
                     onChange(
                       "allergies",
@@ -829,7 +1004,7 @@ function PatientProfileForm({
                         | "",
                     )
                   }
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <option value="">
                     Select
@@ -855,6 +1030,7 @@ function PatientProfileForm({
                 <select
                   id="patient-condition"
                   value={form.existingConditions}
+                  disabled={saving}
                   onChange={(event) =>
                     onChange(
                       "existingConditions",
@@ -863,7 +1039,7 @@ function PatientProfileForm({
                         | "",
                     )
                   }
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <option value="">
                     Select
@@ -901,6 +1077,7 @@ function PatientProfileForm({
                 <Textarea
                   id="patient-medications"
                   value={form.currentMedications}
+                  disabled={saving}
                   onChange={(event) =>
                     onChange(
                       "currentMedications",
@@ -927,6 +1104,7 @@ function PatientProfileForm({
                 <select
                   id="patient-previous-illness"
                   value={form.previousIllnessAnswer}
+                  disabled={saving}
                   onChange={(event) => {
                     const value =
                       event.target.value as
@@ -938,6 +1116,10 @@ function PatientProfileForm({
                       value,
                     );
 
+                    /*
+                     * If there is no previous major illness,
+                     * remove any stale illness description.
+                     */
                     if (value === "No") {
                       onChange(
                         "previousMajorIllnesses",
@@ -945,7 +1127,7 @@ function PatientProfileForm({
                       );
                     }
                   }}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <option value="">
                     Select
@@ -971,6 +1153,7 @@ function PatientProfileForm({
                 <select
                   id="patient-smoking"
                   value={form.smokingStatus}
+                  disabled={saving}
                   onChange={(event) =>
                     onChange(
                       "smokingStatus",
@@ -979,7 +1162,7 @@ function PatientProfileForm({
                         | "",
                     )
                   }
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <option value="">
                     Select
@@ -1009,6 +1192,7 @@ function PatientProfileForm({
                     value={
                       form.previousMajorIllnesses
                     }
+                    disabled={saving}
                     onChange={(event) =>
                       onChange(
                         "previousMajorIllnesses",
@@ -1031,6 +1215,7 @@ function PatientProfileForm({
                 <Textarea
                   id="patient-family-history"
                   value={form.familyHistory}
+                  disabled={saving}
                   onChange={(event) =>
                     onChange(
                       "familyHistory",
@@ -1062,6 +1247,7 @@ function PatientProfileForm({
                 <select
                   id="patient-pregnancy"
                   value={form.pregnancyStatus}
+                  disabled={saving}
                   onChange={(event) =>
                     onChange(
                       "pregnancyStatus",
@@ -1070,7 +1256,7 @@ function PatientProfileForm({
                         | "",
                     )
                   }
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <option value="">
                     Select
@@ -1157,6 +1343,7 @@ function PatientProfileForm({
 function PatientCard({
   patient,
   deleting,
+  editing,
   onEdit,
   onDelete,
   onCheckSymptoms,
@@ -1164,6 +1351,8 @@ function PatientCard({
   patient: PatientProfile;
 
   deleting: boolean;
+
+  editing: boolean;
 
   onEdit: () => void;
 
@@ -1209,9 +1398,16 @@ function PatientCard({
               onClick={onEdit}
               aria-label={`Edit ${patient.name}`}
               title="Edit patient"
-              disabled={deleting}
+              disabled={
+                deleting ||
+                editing
+              }
             >
-              <Edit3 className="size-4" />
+              {editing ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Edit3 className="size-4" />
+              )}
             </Button>
 
             <Button
@@ -1297,13 +1493,15 @@ function PatientCard({
 
           {/* ----------------------------------------------------
               CHECK SYMPTOMS
-              Correct route:
+              
+              Patient-specific route:
               /patient-checker/$patient_ID
           ----------------------------------------------------- */}
 
           <Button
             className="w-full"
             onClick={onCheckSymptoms}
+            disabled={deleting || editing}
           >
             Check Symptoms
 
@@ -1312,15 +1510,18 @@ function PatientCard({
 
           {/* ----------------------------------------------------
               VIEW HISTORY
-              IMPORTANT:
-              This MUST point to patient-history,
-              NOT patient-checker.
+
+              Patient-specific route:
+              /patient-history/$patient_ID
+              
+              This does NOT use /history.
           ----------------------------------------------------- */}
 
           <Button
             variant="outline"
             className="w-full"
             asChild
+            disabled={deleting || editing}
           >
             <Link
               to="/patient-history/$patient_ID"
