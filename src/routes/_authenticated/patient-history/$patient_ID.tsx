@@ -60,9 +60,12 @@ import { Separator } from "@/components/ui/separator";
  *
  * IMPORTANT:
  *
- * This route never uses listChecks().
+ * This route NEVER uses listChecks().
  *
  * It only uses listPatientChecks() for the selected patient.
+ *
+ * Self history and patient history remain completely
+ * data-isolated.
  */
 
 export const Route = createFileRoute(
@@ -123,17 +126,13 @@ function PatientHistoryPage() {
    * PATIENT-ONLY HISTORY
    * =======================================================
    *
-   * HARD DATA ISOLATION:
+   * HARD DATA ISOLATION
    *
-   * Never call listChecks() here.
+   * Server-side listPatientChecks() is responsible for
+   * verifying that this patient belongs to the logged-in
+   * user.
    *
-   * listPatientChecks() is scoped by:
-   *
-   * owner_user_id
-   * +
-   * subject_type = patient
-   * +
-   * patient_id = selected patient
+   * This page never requests self history.
    */
 
   const historyQuery = useQuery({
@@ -154,6 +153,10 @@ function PatientHistoryPage() {
    * =======================================================
    * DELETE PATIENT HISTORY
    * =======================================================
+   *
+   * Only the patient-history query is invalidated.
+   *
+   * Self history is never invalidated or modified here.
    */
 
   const removeMutation =
@@ -201,8 +204,10 @@ function PatientHistoryPage() {
    * SYMPTOM MATCH STRENGTH DATA
    * =======================================================
    *
-   * Uses the existing `severity` database field only
-   * as Symptom Match Strength.
+   * `severity` is interpreted as Symptom Match Strength
+   * through historyMatchStrength().
+   *
+   * This preserves existing history values.
    */
 
   const matchStrengthHistory =
@@ -223,15 +228,12 @@ function PatientHistoryPage() {
    * HEALTH CONDITION TREND DATA
    * =======================================================
    *
-   * IMPORTANT:
+   * ONLY ACTUALLY STORED TREND SCORES ARE USED.
    *
-   * Legacy records with null healthTrendScore are excluded.
+   * Legacy records with null healthTrendScore remain null.
    *
-   * NEVER use:
-   *
-   * healthTrendScore ?? severity
-   *
-   * because severity = Symptom Match Strength.
+   * We NEVER fall back to severity because severity is
+   * Symptom Match Strength.
    */
 
   const healthTrendHistory =
@@ -316,7 +318,7 @@ function PatientHistoryPage() {
 
   /*
    * =======================================================
-   * HEALTH TREND SUMMARY
+   * HEALTH CONDITION TREND SUMMARY
    * =======================================================
    */
 
@@ -669,12 +671,13 @@ function PatientHistoryPage() {
 
                     <CardDescription className="mt-1">
                       A non-clinical indicator based on
-                      this patient's saved symptom-check
-                      information.
+                      {` ${patient.name}'s`} saved
+                      symptom-check information.
                     </CardDescription>
                   </div>
 
-                  {latestHealthTrend !== null && (
+                  {latestHealthTrend !==
+                    null && (
                     <Badge variant="secondary">
                       {formatPercentage(
                         latestHealthTrend,
@@ -686,7 +689,8 @@ function PatientHistoryPage() {
               </CardHeader>
 
               <CardContent className="pt-5">
-                {healthTrendHistory.length === 0 ? (
+                {healthTrendHistory.length ===
+                0 ? (
                   <div className="flex min-h-56 flex-col items-center justify-center rounded-xl border border-dashed bg-muted/20 px-6 text-center">
                     <Activity className="size-8 text-muted-foreground" />
 
@@ -851,7 +855,7 @@ function PatientHistoryPage() {
 
                 <CardDescription>
                   Average symptom-match strength across
-                  this patient's saved checks:{" "}
+                  {` ${patient.name}'s`} saved checks:{" "}
                   <span className="font-medium text-foreground">
                     {formatPercentage(
                       averageMatchStrength,
@@ -896,14 +900,17 @@ function PatientHistoryPage() {
 
               {/* IMPORTANT:
                *
-               * SymptomTimeline now contains ONLY
-               * saved entries.
+               * SymptomTimeline is intentionally used as
+               * a SAVED-CHECK LIST ONLY.
                *
-               * It no longer renders another graph.
+               * It must not render a graph here.
                *
-               * Therefore there is exactly ONE
-               * Symptom Match Strength graph on this page.
-               */}
+               * Therefore this page contains exactly:
+               *
+               * 1 Health Condition Trend graph
+               * 1 Symptom Match Strength graph
+               * 0 AI Risk graphs
+               */
 
               <SymptomTimeline
                 entries={history}
