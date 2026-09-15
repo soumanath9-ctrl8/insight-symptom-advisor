@@ -25,7 +25,11 @@ import {
   deleteCheck,
   listPatientChecks,
 } from "@/lib/history.functions";
-import type { HistoryEntry } from "@/lib/history";
+import {
+  historyHealthTrendScore,
+  historyMatchStrength,
+  type HistoryEntry,
+} from "@/lib/history";
 
 import { ProfileMenu } from "@/components/ProfileMenu";
 import { SymptomTimeline } from "@/components/SymptomTimeline";
@@ -46,15 +50,19 @@ import { Separator } from "@/components/ui/separator";
  * ROUTE
  * =========================================================
  *
- * IMPORTANT:
- *
- * This is the PATIENT HISTORY route.
+ * PATIENT HISTORY ONLY
  *
  * Patient Symptom Checker:
  * /patient-checker/$patient_ID
  *
  * Patient History:
  * /patient-history/$patient_ID
+ *
+ * IMPORTANT:
+ *
+ * This route never uses listChecks().
+ *
+ * It only uses listPatientChecks() for the selected patient.
  */
 
 export const Route = createFileRoute(
@@ -97,7 +105,10 @@ function PatientHistoryPage() {
    */
 
   const patientQuery = useQuery({
-    queryKey: ["patient", patientId],
+    queryKey: [
+      "patient",
+      patientId,
+    ],
 
     queryFn: () =>
       getPatient({
@@ -112,18 +123,24 @@ function PatientHistoryPage() {
    * PATIENT-ONLY HISTORY
    * =======================================================
    *
-   * IMPORTANT:
+   * HARD DATA ISOLATION:
    *
-   * Never use listChecks() here.
+   * Never call listChecks() here.
    *
-   * listPatientChecks() only returns:
+   * listPatientChecks() is scoped by:
    *
+   * owner_user_id
+   * +
    * subject_type = patient
+   * +
    * patient_id = selected patient
    */
 
   const historyQuery = useQuery({
-    queryKey: ["patient-checks", patientId],
+    queryKey: [
+      "patient-checks",
+      patientId,
+    ],
 
     queryFn: () =>
       listPatientChecks({
@@ -135,7 +152,7 @@ function PatientHistoryPage() {
 
   /*
    * =======================================================
-   * DELETE HISTORY
+   * DELETE PATIENT HISTORY
    * =======================================================
    */
 
@@ -181,19 +198,74 @@ function PatientHistoryPage() {
 
   /*
    * =======================================================
+   * SYMPTOM MATCH STRENGTH DATA
+   * =======================================================
+   *
+   * Uses the existing `severity` database field only
+   * as Symptom Match Strength.
+   */
+
+  const matchStrengthHistory =
+    useMemo(() => {
+      return sortedHistory.map(
+        (entry) => ({
+          entry,
+          value:
+            historyMatchStrength(
+              entry,
+            ),
+        }),
+      );
+    }, [sortedHistory]);
+
+  /*
+   * =======================================================
+   * HEALTH CONDITION TREND DATA
+   * =======================================================
+   *
+   * IMPORTANT:
+   *
+   * Legacy records with null healthTrendScore are excluded.
+   *
+   * NEVER use:
+   *
+   * healthTrendScore ?? severity
+   *
+   * because severity = Symptom Match Strength.
+   */
+
+  const healthTrendHistory =
+    useMemo(() => {
+      return sortedHistory
+        .map((entry) => ({
+          entry,
+          value:
+            historyHealthTrendScore(
+              entry,
+            ),
+        }))
+        .filter(
+          (
+            item,
+          ): item is {
+            entry: HistoryEntry;
+            value: number;
+          } =>
+            item.value !== null,
+        );
+    }, [sortedHistory]);
+
+  /*
+   * =======================================================
    * LATEST MATCH STRENGTH
    * =======================================================
    */
 
   const latestMatchStrength =
-    sortedHistory.length > 0
-      ? clampMatchStrength(
-          Number(
-            sortedHistory[
-              sortedHistory.length - 1
-            ]?.severity ?? 0,
-          ),
-        )
+    matchStrengthHistory.length > 0
+      ? matchStrengthHistory[
+          matchStrengthHistory.length - 1
+        ]?.value ?? 0
       : 0;
 
   /*
@@ -203,23 +275,19 @@ function PatientHistoryPage() {
    */
 
   const previousMatchStrength =
-    sortedHistory.length > 1
-      ? clampMatchStrength(
-          Number(
-            sortedHistory[
-              sortedHistory.length - 2
-            ]?.severity ?? 0,
-          ),
-        )
+    matchStrengthHistory.length > 1
+      ? matchStrengthHistory[
+          matchStrengthHistory.length - 2
+        ]?.value ?? null
       : null;
 
   /*
    * =======================================================
-   * TREND
+   * MATCH STRENGTH TREND
    * =======================================================
    */
 
-  const trend =
+  const matchTrend =
     previousMatchStrength === null
       ? "stable"
       : latestMatchStrength >
@@ -237,16 +305,56 @@ function PatientHistoryPage() {
    */
 
   const averageMatchStrength =
-    sortedHistory.length > 0
-      ? sortedHistory.reduce(
-          (sum, entry) =>
-            sum +
-            clampMatchStrength(
-              Number(entry.severity),
-            ),
+    matchStrengthHistory.length > 0
+      ? matchStrengthHistory.reduce(
+          (sum, item) =>
+            sum + item.value,
           0,
-        ) / sortedHistory.length
+        ) /
+        matchStrengthHistory.length
       : 0;
+
+  /*
+   * =======================================================
+   * HEALTH TREND SUMMARY
+   * =======================================================
+   */
+
+  const latestHealthTrend =
+    healthTrendHistory.length > 0
+      ? healthTrendHistory[
+          healthTrendHistory.length - 1
+        ]?.value ?? null
+      : null;
+
+  const previousHealthTrend =
+    healthTrendHistory.length > 1
+      ? healthTrendHistory[
+          healthTrendHistory.length - 2
+        ]?.value ?? null
+      : null;
+
+  const healthTrendDirection =
+    latestHealthTrend === null ||
+    previousHealthTrend === null
+      ? "stable"
+      : latestHealthTrend >
+          previousHealthTrend
+        ? "up"
+        : latestHealthTrend <
+            previousHealthTrend
+          ? "down"
+          : "stable";
+
+  const averageHealthTrend =
+    healthTrendHistory.length > 0
+      ? healthTrendHistory.reduce(
+          (sum, item) =>
+            sum + item.value,
+          0,
+        ) /
+        healthTrendHistory.length
+      : null;
 
   /*
    * =======================================================
@@ -445,7 +553,7 @@ function PatientHistoryPage() {
         </section>
 
         {/* =================================================
-            SEPARATION NOTICE
+            DATA SEPARATION NOTICE
         ================================================== */}
 
         <div className="rounded-xl border bg-muted/40 px-4 py-3">
@@ -519,26 +627,26 @@ function PatientHistoryPage() {
                   <Activity className="size-5" />
                 }
                 label="Latest match strength"
-                value={`${formatMatchStrength(
+                value={`${formatPercentage(
                   latestMatchStrength,
                 )}%`}
               />
 
               <SummaryCard
                 icon={
-                  trend === "up" ? (
+                  matchTrend === "up" ? (
                     <TrendingUp className="size-5" />
-                  ) : trend === "down" ? (
+                  ) : matchTrend === "down" ? (
                     <TrendingDown className="size-5" />
                   ) : (
                     <Activity className="size-5" />
                   )
                 }
-                label="Recent trend"
+                label="Recent match trend"
                 value={
-                  trend === "up"
+                  matchTrend === "up"
                     ? "Higher"
-                    : trend === "down"
+                    : matchTrend === "down"
                       ? "Lower"
                       : "Stable"
                 }
@@ -546,7 +654,131 @@ function PatientHistoryPage() {
             </section>
 
             {/* =================================================
-                GRAPH
+                HEALTH CONDITION TREND
+            ================================================== */}
+
+            <Card className="overflow-hidden">
+              <CardHeader className="pb-2">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Activity className="size-5" />
+
+                      Health Condition Trend
+                    </CardTitle>
+
+                    <CardDescription className="mt-1">
+                      A non-clinical indicator based on
+                      this patient's saved symptom-check
+                      information.
+                    </CardDescription>
+                  </div>
+
+                  {latestHealthTrend !== null && (
+                    <Badge variant="secondary">
+                      {formatPercentage(
+                        latestHealthTrend,
+                      )}
+                      %
+                    </Badge>
+                  )}
+                </div>
+              </CardHeader>
+
+              <CardContent className="pt-5">
+                {healthTrendHistory.length === 0 ? (
+                  <div className="flex min-h-56 flex-col items-center justify-center rounded-xl border border-dashed bg-muted/20 px-6 text-center">
+                    <Activity className="size-8 text-muted-foreground" />
+
+                    <p className="mt-3 text-sm font-medium">
+                      Health trend data is not available yet
+                    </p>
+
+                    <p className="mt-1 max-w-md text-xs leading-5 text-muted-foreground">
+                      New saved checks will appear here
+                      after a Health Condition Trend score
+                      is recorded. Older checks without a
+                      stored trend score are not converted
+                      into one.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <HealthTrendGraph
+                      entries={
+                        healthTrendHistory
+                      }
+                    />
+
+                    <div className="mt-5 flex items-start justify-between gap-4 text-xs text-muted-foreground">
+                      <span>
+                        0% — Worse reported condition
+                      </span>
+
+                      <span className="text-center">
+                        Higher score = better reported
+                        condition
+                      </span>
+
+                      <span>
+                        100% — Better reported condition
+                      </span>
+                    </div>
+
+                    <Separator className="my-5" />
+
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <TrendSummary
+                        label="Latest"
+                        value={
+                          latestHealthTrend !==
+                          null
+                            ? `${formatPercentage(
+                                latestHealthTrend,
+                              )}%`
+                            : "—"
+                        }
+                      />
+
+                      <TrendSummary
+                        label="Average"
+                        value={
+                          averageHealthTrend !==
+                          null
+                            ? `${formatPercentage(
+                                averageHealthTrend,
+                              )}%`
+                            : "—"
+                        }
+                      />
+
+                      <TrendSummary
+                        label="Recent change"
+                        value={
+                          healthTrendDirection ===
+                          "up"
+                            ? "Better"
+                            : healthTrendDirection ===
+                                "down"
+                              ? "Worse"
+                              : "Stable"
+                        }
+                      />
+                    </div>
+
+                    <div className="mt-5 rounded-lg bg-muted/50 px-4 py-3 text-xs leading-5 text-muted-foreground">
+                      This is a non-clinical trend
+                      indicator. It is not a diagnosis,
+                      disease probability, medical risk,
+                      prognosis, or validated clinical score.
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* =================================================
+                SYMPTOM MATCH STRENGTH
             ================================================== */}
 
             <Card className="overflow-hidden">
@@ -556,7 +788,7 @@ function PatientHistoryPage() {
                     <CardTitle className="flex items-center gap-2">
                       <BarChart3 className="size-5" />
 
-                      Symptom Match Strength Trend
+                      Symptom Match Strength
                     </CardTitle>
 
                     <CardDescription className="mt-1">
@@ -577,17 +809,23 @@ function PatientHistoryPage() {
 
               <CardContent className="pt-5">
                 <MatchStrengthGraph
-                  entries={sortedHistory}
+                  entries={
+                    matchStrengthHistory
+                  }
                 />
 
                 <div className="mt-5 flex items-start justify-between gap-4 text-xs text-muted-foreground">
-                  <span>0% — Low match</span>
+                  <span>
+                    0% — Low match
+                  </span>
 
                   <span className="text-center">
                     Symptom Match Strength
                   </span>
 
-                  <span>100% — Strong match</span>
+                  <span>
+                    100% — Strong match
+                  </span>
                 </div>
 
                 <Separator className="my-5" />
@@ -615,7 +853,7 @@ function PatientHistoryPage() {
                   Average symptom-match strength across
                   this patient's saved checks:{" "}
                   <span className="font-medium text-foreground">
-                    {formatMatchStrength(
+                    {formatPercentage(
                       averageMatchStrength,
                     )}
                     %
@@ -641,7 +879,7 @@ function PatientHistoryPage() {
             </Card>
 
             {/* =================================================
-                FULL TIMELINE
+                SAVED CHECKS
             ================================================== */}
 
             <section>
@@ -655,6 +893,17 @@ function PatientHistoryPage() {
                   from {patient.name}'s history.
                 </p>
               </div>
+
+              {/* IMPORTANT:
+               *
+               * SymptomTimeline now contains ONLY
+               * saved entries.
+               *
+               * It no longer renders another graph.
+               *
+               * Therefore there is exactly ONE
+               * Symptom Match Strength graph on this page.
+               */}
 
               <SymptomTimeline
                 entries={history}
@@ -760,64 +1009,319 @@ function SummaryCard({
 
 /*
  * =========================================================
- * HISTORY SUMMARY ROW
+ * TREND SUMMARY
  * =========================================================
  */
 
-function HistorySummaryRow({
-  entry,
+function TrendSummary({
+  label,
+  value,
 }: {
-  entry: HistoryEntry;
+  label: string;
+  value: string;
 }) {
-  const matchStrength =
-    clampMatchStrength(
-      Number(entry.severity),
+  return (
+    <div className="rounded-xl border bg-muted/20 p-4">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
+
+      <p className="mt-1 text-lg font-semibold">
+        {value}
+      </p>
+    </div>
+  );
+}
+
+/*
+ * =========================================================
+ * HEALTH CONDITION TREND GRAPH
+ * =========================================================
+ *
+ * ONLY entries with an actually stored
+ * healthTrendScore are rendered.
+ *
+ * Legacy null values are excluded.
+ */
+
+function HealthTrendGraph({
+  entries,
+}: {
+  entries: Array<{
+    entry: HistoryEntry;
+    value: number;
+  }>;
+}) {
+  const points =
+    entries.slice(-10);
+
+  if (points.length === 0) {
+    return null;
+  }
+
+  const width = 760;
+  const height = 300;
+
+  const paddingLeft = 48;
+  const paddingRight = 24;
+  const paddingTop = 24;
+  const paddingBottom = 44;
+
+  const chartWidth =
+    width -
+    paddingLeft -
+    paddingRight;
+
+  const chartHeight =
+    height -
+    paddingTop -
+    paddingBottom;
+
+  const getX = (
+    index: number,
+  ) => {
+    if (points.length === 1) {
+      return (
+        paddingLeft +
+        chartWidth / 2
+      );
+    }
+
+    return (
+      paddingLeft +
+      (index /
+        (points.length - 1)) *
+        chartWidth
+    );
+  };
+
+  const getY = (
+    value: number,
+  ) => {
+    const score =
+      clampScore(value);
+
+    return (
+      paddingTop +
+      (1 - score / 100) *
+        chartHeight
+    );
+  };
+
+  const coordinates =
+    points.map(
+      (
+        point,
+        index,
+      ) => ({
+        x: getX(index),
+        y: getY(
+          point.value,
+        ),
+        value:
+          clampScore(
+            point.value,
+          ),
+        entry:
+          point.entry,
+      }),
     );
 
-  const dateLabel =
-    formatHistoryDate(entry.date);
+  const path =
+    coordinates
+      .map(
+        (
+          point,
+          index,
+        ) =>
+          index === 0
+            ? `M ${point.x} ${point.y}`
+            : `L ${point.x} ${point.y}`,
+      )
+      .join(" ");
+
+  const gridValues = [
+    0,
+    25,
+    50,
+    75,
+    100,
+  ];
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <CalendarDays className="size-4 shrink-0 text-muted-foreground" />
+    <div className="w-full overflow-x-auto">
+      <div className="min-w-[620px]">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="h-auto w-full"
+          role="img"
+          aria-label="Health Condition Trend graph"
+        >
+          {gridValues.map(
+            (value) => {
+              const y =
+                getY(value);
 
-          <span className="text-sm font-medium">
-            {dateLabel}
-          </span>
-        </div>
+              return (
+                <g key={value}>
+                  <line
+                    x1={
+                      paddingLeft
+                    }
+                    x2={
+                      width -
+                      paddingRight
+                    }
+                    y1={y}
+                    y2={y}
+                    stroke="currentColor"
+                    strokeOpacity="0.12"
+                    strokeWidth="1"
+                  />
 
-        <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">
-          {entry.symptoms ||
-            "Symptom check"}
-        </p>
-
-        {entry.topCondition && (
-          <p className="mt-1 text-xs text-muted-foreground">
-            Main possible condition:{" "}
-            <span className="font-medium text-foreground">
-              {entry.topCondition}
-            </span>
-          </p>
-        )}
-      </div>
-
-      <div className="flex shrink-0 items-center gap-3 sm:flex-col sm:items-end">
-        <Badge variant="secondary">
-          {formatMatchStrength(
-            matchStrength,
+                  <text
+                    x={
+                      paddingLeft -
+                      10
+                    }
+                    y={
+                      y + 4
+                    }
+                    textAnchor="end"
+                    className="fill-muted-foreground text-[11px]"
+                  >
+                    {value}%
+                  </text>
+                </g>
+              );
+            },
           )}
-          %
-        </Badge>
 
-        {entry.urgency && (
-          <span className="text-xs text-muted-foreground">
-            {formatUrgency(
-              entry.urgency,
-            )}
-          </span>
-        )}
+          <line
+            x1={paddingLeft}
+            x2={paddingLeft}
+            y1={paddingTop}
+            y2={
+              height -
+              paddingBottom
+            }
+            stroke="currentColor"
+            strokeOpacity="0.2"
+          />
+
+          <line
+            x1={paddingLeft}
+            x2={
+              width -
+              paddingRight
+            }
+            y1={
+              height -
+              paddingBottom
+            }
+            y2={
+              height -
+              paddingBottom
+            }
+            stroke="currentColor"
+            strokeOpacity="0.2"
+          />
+
+          {coordinates.length >
+            1 && (
+            <path
+              d={path}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="text-primary"
+            />
+          )}
+
+          {coordinates.map(
+            (
+              point,
+            ) => (
+              <g
+                key={
+                  point.entry.id
+                }
+              >
+                <circle
+                  cx={
+                    point.x
+                  }
+                  cy={
+                    point.y
+                  }
+                  r="6"
+                  className="fill-primary"
+                />
+
+                <circle
+                  cx={
+                    point.x
+                  }
+                  cy={
+                    point.y
+                  }
+                  r="10"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeOpacity="0.12"
+                />
+
+                <text
+                  x={
+                    point.x
+                  }
+                  y={
+                    point.y -
+                    14
+                  }
+                  textAnchor="middle"
+                  className="fill-foreground text-[11px] font-medium"
+                >
+                  {
+                    point.value
+                  }
+                  %
+                </text>
+
+                <text
+                  x={
+                    point.x
+                  }
+                  y={
+                    height -
+                    paddingBottom +
+                    22
+                  }
+                  textAnchor="middle"
+                  className="fill-muted-foreground text-[10px]"
+                >
+                  {formatShortDate(
+                    point.entry.date,
+                  )}
+                </text>
+              </g>
+            ),
+          )}
+
+          <text
+            x="14"
+            y={
+              height / 2
+            }
+            transform={`rotate(-90 14 ${height / 2})`}
+            textAnchor="middle"
+            className="fill-muted-foreground text-[10px]"
+          >
+            Health Trend
+          </text>
+        </svg>
       </div>
     </div>
   );
@@ -825,32 +1329,23 @@ function HistorySummaryRow({
 
 /*
  * =========================================================
- * MATCH STRENGTH GRAPH
+ * SYMPTOM MATCH STRENGTH GRAPH
  * =========================================================
  *
- * Database column:
- * severity
- *
- * Application meaning:
- * 0–100 symptom-match strength
- *
- * This is NOT:
- * - diagnostic probability
- * - medical risk percentage
- * - confirmed diagnosis probability
+ * `severity` is interpreted ONLY as
+ * Symptom Match Strength.
  */
 
 function MatchStrengthGraph({
   entries,
 }: {
-  entries: HistoryEntry[];
+  entries: Array<{
+    entry: HistoryEntry;
+    value: number;
+  }>;
 }) {
-  /*
-   * Show latest 10 entries while keeping
-   * chronological order.
-   */
-
-  const points = entries.slice(-10);
+  const points =
+    entries.slice(-10);
 
   if (points.length === 0) {
     return (
@@ -899,16 +1394,14 @@ function MatchStrengthGraph({
   };
 
   const getY = (
-    matchStrength: number,
+    value: number,
   ) => {
-    const value =
-      clampMatchStrength(
-        matchStrength,
-      );
+    const score =
+      clampScore(value);
 
     return (
       paddingTop +
-      (1 - value / 100) *
+      (1 - score / 100) *
         chartHeight
     );
   };
@@ -916,25 +1409,19 @@ function MatchStrengthGraph({
   const coordinates =
     points.map(
       (
-        entry,
+        point,
         index,
       ) => ({
         x: getX(index),
-
         y: getY(
-          Number(
-            entry.severity,
-          ),
+          point.value,
         ),
-
         value:
-          clampMatchStrength(
-            Number(
-              entry.severity,
-            ),
+          clampScore(
+            point.value,
           ),
-
-        entry,
+        entry:
+          point.entry,
       }),
     );
 
@@ -951,10 +1438,6 @@ function MatchStrengthGraph({
       )
       .join(" ");
 
-  /*
-   * 0–100 scale.
-   */
-
   const gridValues = [
     0,
     25,
@@ -970,12 +1453,8 @@ function MatchStrengthGraph({
           viewBox={`0 0 ${width} ${height}`}
           className="h-auto w-full"
           role="img"
-          aria-label="Patient symptom match strength trend graph"
+          aria-label="Symptom Match Strength graph"
         >
-          {/* =================================================
-              GRID
-          ================================================== */}
-
           {gridValues.map(
             (value) => {
               const y =
@@ -1016,10 +1495,6 @@ function MatchStrengthGraph({
             },
           )}
 
-          {/* =================================================
-              AXIS
-          ================================================== */}
-
           <line
             x1={paddingLeft}
             x2={paddingLeft}
@@ -1050,10 +1525,6 @@ function MatchStrengthGraph({
             strokeOpacity="0.2"
           />
 
-          {/* =================================================
-              TREND LINE
-          ================================================== */}
-
           {coordinates.length >
             1 && (
             <path
@@ -1066,10 +1537,6 @@ function MatchStrengthGraph({
               className="text-primary"
             />
           )}
-
-          {/* =================================================
-              DATA POINTS
-          ================================================== */}
 
           {coordinates.map(
             (
@@ -1104,8 +1571,6 @@ function MatchStrengthGraph({
                   strokeOpacity="0.12"
                 />
 
-                {/* Match strength */}
-
                 <text
                   x={
                     point.x
@@ -1123,8 +1588,6 @@ function MatchStrengthGraph({
                   %
                 </text>
 
-                {/* Date */}
-
                 <text
                   x={
                     point.x
@@ -1138,18 +1601,12 @@ function MatchStrengthGraph({
                   className="fill-muted-foreground text-[10px]"
                 >
                   {formatShortDate(
-                    point
-                      .entry
-                      .date,
+                    point.entry.date,
                   )}
                 </text>
               </g>
             ),
           )}
-
-          {/* =================================================
-              Y-AXIS LABEL
-          ================================================== */}
 
           <text
             x="14"
@@ -1170,13 +1627,75 @@ function MatchStrengthGraph({
 
 /*
  * =========================================================
+ * HISTORY SUMMARY ROW
+ * =========================================================
+ */
+
+function HistorySummaryRow({
+  entry,
+}: {
+  entry: HistoryEntry;
+}) {
+  const matchStrength =
+    historyMatchStrength(
+      entry,
+    );
+
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <CalendarDays className="size-4 shrink-0 text-muted-foreground" />
+
+          <span className="text-sm font-medium">
+            {formatHistoryDate(
+              entry.date,
+            )}
+          </span>
+        </div>
+
+        <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">
+          {entry.symptoms ||
+            "Symptom check"}
+        </p>
+
+        {entry.topCondition && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            Main possible condition:{" "}
+            <span className="font-medium text-foreground">
+              {entry.topCondition}
+            </span>
+          </p>
+        )}
+      </div>
+
+      <div className="flex shrink-0 items-center gap-3 sm:flex-col sm:items-end">
+        <Badge variant="secondary">
+          {formatPercentage(
+            matchStrength,
+          )}
+          %
+        </Badge>
+
+        <span className="text-xs text-muted-foreground">
+          {formatUrgency(
+            entry.urgency,
+          )}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/*
+ * =========================================================
  * HELPERS
  * =========================================================
  */
 
-function clampMatchStrength(
+function clampScore(
   value: number,
-) {
+): number {
   if (
     !Number.isFinite(
       value,
@@ -1185,26 +1704,26 @@ function clampMatchStrength(
     return 0;
   }
 
-  return Math.min(
-    100,
-    Math.max(
-      0,
-      value,
+  return Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(value),
     ),
   );
 }
 
-function formatMatchStrength(
+function formatPercentage(
   value: number,
-) {
-  return clampMatchStrength(
+): string {
+  return clampScore(
     value,
-  ).toFixed(1);
+  ).toString();
 }
 
 function formatHistoryDate(
   value: string,
-) {
+): string {
   const date =
     new Date(value);
 
@@ -1229,7 +1748,7 @@ function formatHistoryDate(
 
 function formatShortDate(
   value: string,
-) {
+): string {
   const date =
     new Date(value);
 
@@ -1252,7 +1771,7 @@ function formatShortDate(
 
 function formatUrgency(
   urgency: HistoryEntry["urgency"],
-) {
+): string {
   switch (urgency) {
     case "emergency":
       return "Emergency";
