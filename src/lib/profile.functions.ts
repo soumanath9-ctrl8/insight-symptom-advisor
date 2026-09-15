@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 /* -------------------------------------------------------------------------- */
@@ -41,7 +42,10 @@ const ProfileSchema = z
     currentMedications: z
       .string()
       .trim()
-      .max(2000, "Current medications information is too long.")
+      .max(
+        2000,
+        "Current medications information is too long.",
+      )
       .default(""),
 
     previousMajorIllnesses: YesNoSchema,
@@ -49,7 +53,10 @@ const ProfileSchema = z
     previousMajorIllnessDetails: z
       .string()
       .trim()
-      .max(2000, "Previous illness information is too long.")
+      .max(
+        2000,
+        "Previous illness information is too long.",
+      )
       .default(""),
 
     smokingStatus: YesNoSchema,
@@ -57,13 +64,19 @@ const ProfileSchema = z
     familyHistory: z
       .string()
       .trim()
-      .max(2000, "Family history information is too long.")
+      .max(
+        2000,
+        "Family history information is too long.",
+      )
       .default(""),
 
     pregnancyStatus: z
       .string()
       .trim()
-      .max(100, "Pregnancy status is invalid.")
+      .max(
+        100,
+        "Pregnancy status is invalid.",
+      )
       .default(""),
   })
   .superRefine((value, ctx) => {
@@ -80,7 +93,8 @@ const ProfileSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["previousMajorIllnessDetails"],
-        message: "Please enter the previous major illness.",
+        message:
+          "Please enter the previous major illness.",
       });
     }
 
@@ -112,7 +126,8 @@ const ProfileSchema = z
     }
   });
 
-export type ProfileInput = z.infer<typeof ProfileSchema>;
+export type ProfileInput =
+  z.infer<typeof ProfileSchema>;
 
 /* -------------------------------------------------------------------------- */
 /*                              Server Supabase                               */
@@ -123,9 +138,12 @@ export type ProfileInput = z.infer<typeof ProfileSchema>;
  *
  * The browser Supabase client is NOT used in this file.
  *
- * This dynamically loads Lovable's generated server-only Supabase client.
+ * This dynamically loads the generated server-only Supabase client.
  *
  * The service-role credential therefore remains server-side.
+ *
+ * Every operation below still performs explicit ownership checks.
+ * Service-role access must NEVER be treated as an authorization mechanism.
  */
 async function getSupabaseAdmin() {
   const module = await import(
@@ -140,7 +158,11 @@ async function getSupabaseAdmin() {
 /* -------------------------------------------------------------------------- */
 
 function requireUserId(
-  context: { userId?: string } | undefined,
+  context:
+    | {
+        userId?: string;
+      }
+    | undefined,
 ) {
   const userId = context?.userId;
 
@@ -158,12 +180,14 @@ function requireUserId(
 /* -------------------------------------------------------------------------- */
 
 function databaseError(
-  error: {
-    message?: string;
-    code?: string;
-    details?: string;
-    hint?: string;
-  } | null,
+  error:
+    | {
+        message?: string;
+        code?: string;
+        details?: string;
+        hint?: string;
+      }
+    | null,
 ) {
   if (!error) {
     return "An unknown database error occurred.";
@@ -173,7 +197,10 @@ function databaseError(
     return "Profile was not found.";
   }
 
-  return error.message || "Database operation failed.";
+  return (
+    error.message ||
+    "Database operation failed."
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -202,11 +229,18 @@ function toProfileRow(
       input.currentMedications.trim() || null,
 
     /*
-     * Only save the illness description when the answer is Yes.
+     * Only save the illness description when
+     * the answer is Yes.
+     *
+     * The database column stores the actual
+     * previous-illness description rather than
+     * a separate Yes/No flag.
      */
     previous_major_illnesses:
-      input.previousMajorIllnesses === "Yes"
-        ? input.previousMajorIllnessDetails.trim() || null
+      input.previousMajorIllnesses ===
+      "Yes"
+        ? input.previousMajorIllnessDetails.trim() ||
+          null
         : null,
 
     smoking_status:
@@ -220,7 +254,8 @@ function toProfileRow(
      */
     pregnancy_status:
       input.sex === "Female"
-        ? input.pregnancyStatus.trim() || null
+        ? input.pregnancyStatus.trim() ||
+          null
         : null,
 
     updated_at:
@@ -236,200 +271,379 @@ function toProfileRow(
  * Kept for compatibility with the existing profile UI.
  *
  * IMPORTANT:
- * This no longer checks SUPABASE_URL or SUPABASE_PUBLISHABLE_KEY.
  *
- * Those browser environment variables are not required for this server
- * function because the server uses Lovable's generated client.server.ts.
+ * This function does not expose Supabase credentials.
  */
-export const checkSupabaseConfig = createServerFn({
-  method: "GET",
-})
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-  const userId = (context as { userId?: string })?.userId;
+export const checkSupabaseConfig =
+  createServerFn({
+    method: "GET",
+  })
+    .middleware([requireSupabaseAuth])
+    .handler(
+      async ({ context }) => {
+        const userId = (
+          context as {
+            userId?: string;
+          }
+        )?.userId;
 
-  return {
-    configured: true,
-    authenticated: Boolean(userId),
-  };
-});
+        return {
+          configured: true,
+          authenticated:
+            Boolean(userId),
+        };
+      },
+    );
 
 /* -------------------------------------------------------------------------- */
 /*                              Get Own Profile                               */
 /* -------------------------------------------------------------------------- */
 
-export const getProfile = createServerFn({
-  method: "GET",
-})
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-  const userId = requireUserId(context);
+export const getProfile =
+  createServerFn({
+    method: "GET",
+  })
+    .middleware([
+      requireSupabaseAuth,
+    ])
+    .handler(
+      async ({ context }) => {
+        const userId =
+          requireUserId(
+            context,
+          );
 
-  const supabaseAdmin =
-    await getSupabaseAdmin();
+        const supabaseAdmin =
+          await getSupabaseAdmin();
 
-  const { data, error } =
-    await supabaseAdmin
-      .from("profiles")
-      .select(
-        [
-          "id",
-          "name",
-          "age",
-          "sex",
-          "allergies",
-          "existing_conditions",
-          "current_medications",
-          "previous_major_illnesses",
-          "smoking_status",
-          "family_history",
-          "pregnancy_status",
-          "created_at",
-          "updated_at",
-        ].join(","),
-      )
-      .eq("id", userId)
-      .maybeSingle();
+        /*
+         * IMPORTANT:
+         *
+         * Self profile is addressed ONLY by the
+         * authenticated user's own auth user ID.
+         *
+         * No arbitrary profile ID is accepted
+         * from the browser.
+         */
+        const {
+          data,
+          error,
+        } =
+          await supabaseAdmin
+            .from("profiles")
+            .select(
+              [
+                "id",
+                "name",
+                "age",
+                "sex",
+                "allergies",
+                "existing_conditions",
+                "current_medications",
+                "previous_major_illnesses",
+                "smoking_status",
+                "family_history",
+                "pregnancy_status",
+                "created_at",
+                "updated_at",
+              ].join(","),
+            )
+            .eq("id", userId)
+            .maybeSingle();
 
-  if (error) {
-    throw new Error(
-      `Unable to load profile: ${databaseError(error)}`,
+        if (error) {
+          throw new Error(
+            `Unable to load profile: ${databaseError(
+              error,
+            )}`,
+          );
+        }
+
+        return {
+          configured: true,
+          profile: data,
+        };
+      },
     );
-  }
-
-  return {
-    configured: true,
-    profile: data,
-  };
-});
 
 /* -------------------------------------------------------------------------- */
 /*                              Save Own Profile                              */
 /* -------------------------------------------------------------------------- */
 
-export const saveProfile = createServerFn({
-  method: "POST",
-})
-  .middleware([requireSupabaseAuth])
-  .inputValidator(ProfileSchema)
-  .handler(async ({ data, context }) => {
-    const userId = requireUserId(context);
+export const saveProfile =
+  createServerFn({
+    method: "POST",
+  })
+    .middleware([
+      requireSupabaseAuth,
+    ])
+    .inputValidator(
+      ProfileSchema,
+    )
+    .handler(
+      async ({
+        data,
+        context,
+      }) => {
+        const userId =
+          requireUserId(
+            context,
+          );
 
-    const supabaseAdmin =
-      await getSupabaseAdmin();
+        const supabaseAdmin =
+          await getSupabaseAdmin();
 
-    const payload =
-      toProfileRow(data);
+        const payload =
+          toProfileRow(data);
 
-    /*
-     * The profile table is normally created automatically when
-     * a Supabase Auth user is created.
-     *
-     * We first attempt an update because the profile already exists
-     * in the normal application flow.
-     */
-    const { data: updated, error: updateError } =
-      await supabaseAdmin
-        .from("profiles")
-        .update(payload)
-        .eq("id", userId)
-        .select(
-          [
-            "id",
-            "name",
-            "age",
-            "sex",
-            "allergies",
-            "existing_conditions",
-            "current_medications",
-            "previous_major_illnesses",
-            "smoking_status",
-            "family_history",
-            "pregnancy_status",
-            "created_at",
-            "updated_at",
-          ].join(","),
-        )
-        .maybeSingle();
+        /*
+         * Update the authenticated user's
+         * own profile only.
+         */
+        const {
+          data: updated,
+          error: updateError,
+        } =
+          await supabaseAdmin
+            .from("profiles")
+            .update(payload)
+            .eq("id", userId)
+            .select(
+              [
+                "id",
+                "name",
+                "age",
+                "sex",
+                "allergies",
+                "existing_conditions",
+                "current_medications",
+                "previous_major_illnesses",
+                "smoking_status",
+                "family_history",
+                "pregnancy_status",
+                "created_at",
+                "updated_at",
+              ].join(","),
+            )
+            .maybeSingle();
 
-    if (updateError) {
-      throw new Error(
-        `Unable to save profile: ${databaseError(updateError)}`,
-      );
-    }
+        if (updateError) {
+          throw new Error(
+            `Unable to save profile: ${databaseError(
+              updateError,
+            )}`,
+          );
+        }
 
-    /*
-     * If the row does not exist for some reason, create it.
-     *
-     * This protects the profile page from a missing profile row
-     * without requiring the user to manually create one.
-     */
-    if (!updated) {
-      const { data: inserted, error: insertError } =
-        await supabaseAdmin
-          .from("profiles")
-          .insert({
-            id: userId,
-            ...payload,
-          })
-          .select(
-            [
-              "id",
-              "name",
-              "age",
-              "sex",
-              "allergies",
-              "existing_conditions",
-              "current_medications",
-              "previous_major_illnesses",
-              "smoking_status",
-              "family_history",
-              "pregnancy_status",
-              "created_at",
-              "updated_at",
-            ].join(","),
-          )
-          .single();
+        /*
+         * If the row does not exist,
+         * create it using the authenticated
+         * user's ID.
+         */
+        if (!updated) {
+          const {
+            data: inserted,
+            error: insertError,
+          } =
+            await supabaseAdmin
+              .from("profiles")
+              .insert({
+                id: userId,
+                ...payload,
+              })
+              .select(
+                [
+                  "id",
+                  "name",
+                  "age",
+                  "sex",
+                  "allergies",
+                  "existing_conditions",
+                  "current_medications",
+                  "previous_major_illnesses",
+                  "smoking_status",
+                  "family_history",
+                  "pregnancy_status",
+                  "created_at",
+                  "updated_at",
+                ].join(","),
+              )
+              .single();
 
-      if (insertError) {
-        throw new Error(
-          `Unable to create profile: ${databaseError(insertError)}`,
-        );
-      }
+          if (insertError) {
+            throw new Error(
+              `Unable to create profile: ${databaseError(
+                insertError,
+              )}`,
+            );
+          }
 
-      return {
-        success: true,
-        profile: inserted,
-      };
-    }
+          return {
+            success: true,
+            profile: inserted,
+          };
+        }
 
-    return {
-      success: true,
-      profile: updated,
-    };
-  });
+        return {
+          success: true,
+          profile: updated,
+        };
+      },
+    );
+
 /* -------------------------------------------------------------------------- */
 /*                     UI-facing profile / patient helpers                    */
 /* -------------------------------------------------------------------------- */
 
 /**
- * Shape used by the profile editor UI (ProfileData in profile.types.ts).
- * previousMajorIllnesses is stored as free text here.
+ * Shape used by the existing profile editor UI.
+ *
+ * IMPORTANT:
+ *
+ * previousMajorIllnesses is kept as free text here
+ * because the existing UI uses this value to hold
+ * the actual illness description.
+ *
+ * This preserves compatibility with the current UI
+ * while the validated ProfileSchema above remains
+ * available for the stricter profile workflow.
  */
-const UiProfileSchema = z.object({
-  name: z.string().trim().max(100).default(""),
-  age: z.string().trim().max(10).default(""),
-  sex: z.string().trim().max(20).default(""),
-  allergies: z.string().trim().max(20).default(""),
-  existingConditions: z.string().trim().max(40).default(""),
-  currentMedications: z.string().trim().max(2000).default(""),
-  previousMajorIllnesses: z.string().trim().max(2000).default(""),
-  smokingStatus: z.string().trim().max(20).default(""),
-  familyHistory: z.string().trim().max(2000).default(""),
-  pregnancyStatus: z.string().trim().max(20).default(""),
-});
+const UiProfileSchema =
+  z.object({
+    name: z
+      .string()
+      .trim()
+      .max(100)
+      .default(""),
 
-type UiProfileInput = z.infer<typeof UiProfileSchema>;
+    age: z
+      .string()
+      .trim()
+      .max(10)
+      .default(""),
+
+    sex: z
+      .string()
+      .trim()
+      .max(20)
+      .default(""),
+
+    allergies: z
+      .string()
+      .trim()
+      .max(20)
+      .default(""),
+
+    existingConditions: z
+      .string()
+      .trim()
+      .max(40)
+      .default(""),
+
+    currentMedications: z
+      .string()
+      .trim()
+      .max(2000)
+      .default(""),
+
+    previousMajorIllnesses:
+      z
+        .string()
+        .trim()
+        .max(2000)
+        .default(""),
+
+    smokingStatus: z
+      .string()
+      .trim()
+      .max(20)
+      .default(""),
+
+    familyHistory: z
+      .string()
+      .trim()
+      .max(2000)
+      .default(""),
+
+    pregnancyStatus:
+      z
+        .string()
+        .trim()
+        .max(20)
+        .default(""),
+  });
+
+type UiProfileInput =
+  z.infer<
+    typeof UiProfileSchema
+  >;
+
+/* -------------------------------------------------------------------------- */
+/*                         UI profile normalization                           */
+/* -------------------------------------------------------------------------- */
+
+function normalizeUiSex(
+  value: string,
+): "" | "Male" | "Female" {
+  const normalized =
+    value.trim();
+
+  if (
+    normalized === "Male"
+  ) {
+    return "Male";
+  }
+
+  if (
+    normalized === "Female"
+  ) {
+    return "Female";
+  }
+
+  return "";
+}
+
+function normalizeUiYesNo(
+  value: string,
+): "" | "Yes" | "No" {
+  const normalized =
+    value.trim();
+
+  if (
+    normalized === "Yes"
+  ) {
+    return "Yes";
+  }
+
+  if (
+    normalized === "No"
+  ) {
+    return "No";
+  }
+
+  return "";
+}
+
+function normalizeExistingCondition(
+  value: string,
+): string {
+  const normalized =
+    value.trim();
+
+  if (
+    ExistingConditionSchema.safeParse(
+      normalized,
+    ).success
+  ) {
+    return normalized;
+  }
+
+  return normalized;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                       UI profile database mapping                          */
+/* -------------------------------------------------------------------------- */
 
 const UI_COLUMNS = [
   "id",
@@ -445,226 +659,816 @@ const UI_COLUMNS = [
   "pregnancy_status",
 ].join(",");
 
-function toUiRow(input: UiProfileInput) {
+function toUiRow(
+  input: UiProfileInput,
+) {
+  const sex =
+    normalizeUiSex(
+      input.sex,
+    );
+
+  const allergies =
+    normalizeUiYesNo(
+      input.allergies,
+    );
+
+  const smokingStatus =
+    normalizeUiYesNo(
+      input.smokingStatus,
+    );
+
+  const pregnancyStatus =
+    sex === "Female"
+      ? normalizeUiYesNo(
+          input.pregnancyStatus,
+        )
+      : "";
+
   return {
-    name: input.name,
-    age: input.age || null,
-    sex: input.sex || null,
-    allergies: input.allergies || null,
-    existing_conditions: input.existingConditions || null,
-    current_medications: input.currentMedications || null,
-    previous_major_illnesses: input.previousMajorIllnesses || null,
-    smoking_status: input.smokingStatus || null,
-    family_history: input.familyHistory || null,
+    name:
+      input.name.trim(),
+
+    age:
+      input.age.trim() ||
+      null,
+
+    sex:
+      sex || null,
+
+    allergies:
+      allergies || null,
+
+    existing_conditions:
+      normalizeExistingCondition(
+        input.existingConditions,
+      ) || null,
+
+    current_medications:
+      input.currentMedications.trim() ||
+      null,
+
+    previous_major_illnesses:
+      input.previousMajorIllnesses.trim() ||
+      null,
+
+    smoking_status:
+      smokingStatus || null,
+
+    family_history:
+      input.familyHistory.trim() ||
+      null,
+
+    /*
+     * Male users can never persist
+     * pregnancy information through
+     * this server function.
+     */
     pregnancy_status:
-      input.sex === "Female" ? input.pregnancyStatus || null : null,
-    updated_at: new Date().toISOString(),
+      pregnancyStatus || null,
+
+    updated_at:
+      new Date().toISOString(),
   };
 }
 
-function fromUiRow(row: Record<string, unknown> | null) {
-  if (!row) return null;
+/* -------------------------------------------------------------------------- */
+/*                           UI profile conversion                            */
+/* -------------------------------------------------------------------------- */
 
-  const text = (value: unknown) =>
-    typeof value === "string" ? value : value == null ? "" : String(value);
+function fromUiRow(
+  row:
+    | Record<string, unknown>
+    | null,
+) {
+  if (!row) {
+    return null;
+  }
+
+  const text = (
+    value: unknown,
+  ) =>
+    typeof value ===
+    "string"
+      ? value
+      : value == null
+        ? ""
+        : String(value);
+
+  const sex =
+    normalizeUiSex(
+      text(row["sex"]),
+    );
+
+  const allergies =
+    normalizeUiYesNo(
+      text(row["allergies"]),
+    );
+
+  const smokingStatus =
+    normalizeUiYesNo(
+      text(
+        row[
+          "smoking_status"
+        ],
+      ),
+    );
+
+  const pregnancyStatus =
+    sex === "Female"
+      ? normalizeUiYesNo(
+          text(
+            row[
+              "pregnancy_status"
+            ],
+          ),
+        )
+      : "";
 
   return {
     id: text(row["id"]),
-    name: text(row["name"]),
-    age: text(row["age"]),
-    sex: text(row["sex"]) as "Male" | "Female" | "",
-    allergies: text(row["allergies"]) as "Yes" | "No" | "",
-    existingConditions: text(row["existing_conditions"]) as never,
-    currentMedications: text(row["current_medications"]),
-    previousMajorIllnesses: text(row["previous_major_illnesses"]),
-    smokingStatus: text(row["smoking_status"]) as "Yes" | "No" | "",
-    familyHistory: text(row["family_history"]),
-    pregnancyStatus: text(row["pregnancy_status"]) as "Yes" | "No" | "",
+
+    name: text(
+      row["name"],
+    ),
+
+    age: text(
+      row["age"],
+    ),
+
+    sex,
+
+    allergies,
+
+    existingConditions:
+      normalizeExistingCondition(
+        text(
+          row[
+            "existing_conditions"
+          ],
+        ),
+      ) as never,
+
+    currentMedications:
+      text(
+        row[
+          "current_medications"
+        ],
+      ),
+
+    previousMajorIllnesses:
+      text(
+        row[
+          "previous_major_illnesses"
+        ],
+      ),
+
+    smokingStatus,
+
+    familyHistory:
+      text(
+        row[
+          "family_history"
+        ],
+      ),
+
+    pregnancyStatus,
   };
 }
 
-export const getOwnProfile = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(
-  async ({ context }) => {
-    const userId = requireUserId(context);
-    const supabaseAdmin = await getSupabaseAdmin();
+/* -------------------------------------------------------------------------- */
+/*                           Get Own UI Profile                               */
+/* -------------------------------------------------------------------------- */
 
-    const { data, error } = await supabaseAdmin
-      .from("profiles")
-      .select(UI_COLUMNS)
-      .eq("id", userId)
-      .maybeSingle();
+export const getOwnProfile =
+  createServerFn({
+    method: "GET",
+  })
+    .middleware([
+      requireSupabaseAuth,
+    ])
+    .handler(
+      async ({
+        context,
+      }) => {
+        const userId =
+          requireUserId(
+            context,
+          );
 
-    if (error) {
-      throw new Error(`Unable to load profile: ${databaseError(error)}`);
-    }
+        const supabaseAdmin =
+          await getSupabaseAdmin();
 
-    return fromUiRow(data as unknown as Record<string, unknown> | null);
-  },
-);
+        /*
+         * SECURITY:
+         *
+         * The authenticated user ID is the
+         * ONLY profile ID used here.
+         */
+        const {
+          data,
+          error,
+        } =
+          await supabaseAdmin
+            .from("profiles")
+            .select(
+              UI_COLUMNS,
+            )
+            .eq(
+              "id",
+              userId,
+            )
+            .maybeSingle();
 
-export const updateOwnProfile = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator(UiProfileSchema)
-  .handler(async ({ data, context }) => {
-    const userId = requireUserId(context);
-    const supabaseAdmin = await getSupabaseAdmin();
+        if (error) {
+          throw new Error(
+            `Unable to load profile: ${databaseError(
+              error,
+            )}`,
+          );
+        }
 
-    const payload = toUiRow(data);
-
-    const { data: updated, error } = await supabaseAdmin
-      .from("profiles")
-      .update(payload)
-      .eq("id", userId)
-      .select(UI_COLUMNS)
-      .maybeSingle();
-
-    if (error) {
-      throw new Error(`Unable to save profile: ${databaseError(error)}`);
-    }
-
-    if (!updated) {
-      const { data: inserted, error: insertError } = await supabaseAdmin
-        .from("profiles")
-        .insert({ id: userId, ...payload })
-        .select(UI_COLUMNS)
-        .single();
-
-      if (insertError) {
-        throw new Error(
-          `Unable to create profile: ${databaseError(insertError)}`,
+        return fromUiRow(
+          data as unknown as
+            | Record<
+                string,
+                unknown
+              >
+            | null,
         );
-      }
+      },
+    );
 
-      return fromUiRow(inserted as unknown as Record<string, unknown>);
-    }
+/* -------------------------------------------------------------------------- */
+/*                         Update Own UI Profile                              */
+/* -------------------------------------------------------------------------- */
 
-    return fromUiRow(updated as unknown as Record<string, unknown>);
-  });
+export const updateOwnProfile =
+  createServerFn({
+    method: "POST",
+  })
+    .middleware([
+      requireSupabaseAuth,
+    ])
+    .inputValidator(
+      UiProfileSchema,
+    )
+    .handler(
+      async ({
+        data,
+        context,
+      }) => {
+        const userId =
+          requireUserId(
+            context,
+          );
 
-export const listPatientProfiles = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(
-  async ({ context }) => {
-    const userId = requireUserId(context);
-    const supabaseAdmin = await getSupabaseAdmin();
+        const supabaseAdmin =
+          await getSupabaseAdmin();
 
-    const { data, error } = await supabaseAdmin
-      .from("patient_profiles")
-      .select("*")
-      .eq("owner_user_id", userId)
-      .order("created_at", { ascending: false });
+        const payload =
+          toUiRow(data);
 
-    if (error) {
-      throw new Error(
-        `Unable to load patient profiles: ${databaseError(error)}`,
-      );
-    }
+        /*
+         * SECURITY:
+         *
+         * The row can ONLY be updated
+         * when its primary key equals the
+         * authenticated user's ID.
+         */
+        const {
+          data: updated,
+          error,
+        } =
+          await supabaseAdmin
+            .from("profiles")
+            .update(payload)
+            .eq(
+              "id",
+              userId,
+            )
+            .select(
+              UI_COLUMNS,
+            )
+            .maybeSingle();
 
-    return (data ?? []).map((row) => {
-      const profile = fromUiRow(row as unknown as Record<string, unknown>)!;
+        if (error) {
+          throw new Error(
+            `Unable to save profile: ${databaseError(
+              error,
+            )}`,
+          );
+        }
 
-      return {
-        ...profile,
-        ownerUserId: String((row as unknown as Record<string, unknown>)["owner_user_id"] ?? ""),
-        createdAt: String((row as unknown as Record<string, unknown>)["created_at"] ?? ""),
-        updatedAt: String((row as unknown as Record<string, unknown>)["updated_at"] ?? ""),
-      };
-    });
+        if (!updated) {
+          const {
+            data: inserted,
+            error:
+              insertError,
+          } =
+            await supabaseAdmin
+              .from("profiles")
+              .insert({
+                id: userId,
+                ...payload,
+              })
+              .select(
+                UI_COLUMNS,
+              )
+              .single();
+
+          if (insertError) {
+            throw new Error(
+              `Unable to create profile: ${databaseError(
+                insertError,
+              )}`,
+            );
+          }
+
+          return fromUiRow(
+            inserted as unknown as Record<
+              string,
+              unknown
+            >,
+          );
+        }
+
+        return fromUiRow(
+          updated as unknown as Record<
+            string,
+            unknown
+          >,
+        );
+      },
+    );
+
+/* -------------------------------------------------------------------------- */
+/*                       Patient ownership helper                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Verify that a patient belongs to the authenticated user.
+ *
+ * This helper is intentionally server-only.
+ *
+ * A patient ID by itself is NEVER treated as sufficient
+ * authorization.
+ */
+async function getOwnedPatientRow(
+  supabaseAdmin: {
+    from: (
+      table: string,
+    ) => any;
   },
-);
-
-export const getPatient = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({ id: z.string().uuid() }))
-  .handler(async ({ data, context }) => {
-    const userId = requireUserId(context);
-    const supabaseAdmin = await getSupabaseAdmin();
-
-    const { data: patient, error } = await supabaseAdmin
-      .from("patient_profiles")
+  userId: string,
+  patientId: string,
+) {
+  const {
+    data,
+    error,
+  } =
+    await supabaseAdmin
+      .from(
+        "patient_profiles",
+      )
       .select("*")
-      .eq("id", data.id)
-      .eq("owner_user_id", userId)
+      .eq(
+        "id",
+        patientId,
+      )
+      .eq(
+        "owner_user_id",
+        userId,
+      )
       .maybeSingle();
 
-    if (error) {
-      throw new Error(`Unable to load patient: ${databaseError(error)}`);
-    }
+  if (error) {
+    throw new Error(
+      `Unable to load patient: ${databaseError(
+        error,
+      )}`,
+    );
+  }
 
-    return fromUiRow(patient as unknown as Record<string, unknown> | null);
-  });
+  if (!data) {
+    throw new Error(
+      "Patient profile was not found or you do not have access to it.",
+    );
+  }
 
-export const createPatientProfile = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator(UiProfileSchema)
-  .handler(async ({ data, context }) => {
-    const userId = requireUserId(context);
-    const supabaseAdmin = await getSupabaseAdmin();
+  return data;
+}
 
-    const { updated_at, ...row } = toUiRow(data);
+/* -------------------------------------------------------------------------- */
+/*                         List Patient Profiles                              */
+/* -------------------------------------------------------------------------- */
 
-    const { data: inserted, error } = await supabaseAdmin
-      .from("patient_profiles")
-      .insert({ owner_user_id: userId, ...row })
-      .select("*")
-      .single();
+export const listPatientProfiles =
+  createServerFn({
+    method: "GET",
+  })
+    .middleware([
+      requireSupabaseAuth,
+    ])
+    .handler(
+      async ({
+        context,
+      }) => {
+        const userId =
+          requireUserId(
+            context,
+          );
 
-    if (error) {
-      throw new Error(`Unable to create patient: ${databaseError(error)}`);
-    }
+        const supabaseAdmin =
+          await getSupabaseAdmin();
 
-    return fromUiRow(inserted as unknown as Record<string, unknown>);
-  });
+        /*
+         * SECURITY:
+         *
+         * Never return all patient profiles.
+         *
+         * Only profiles owned by the authenticated
+         * user are returned.
+         */
+        const {
+          data,
+          error,
+        } =
+          await supabaseAdmin
+            .from(
+              "patient_profiles",
+            )
+            .select("*")
+            .eq(
+              "owner_user_id",
+              userId,
+            )
+            .order(
+              "created_at",
+              {
+                ascending:
+                  false,
+              },
+            );
 
-export const updatePatientProfile = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator(
-    z.object({
-      id: z.string().uuid(),
-      profile: UiProfileSchema,
-    }),
-  )
-  .handler(async ({ data, context }) => {
-    const userId = requireUserId(context);
-    const supabaseAdmin = await getSupabaseAdmin();
+        if (error) {
+          throw new Error(
+            `Unable to load patient profiles: ${databaseError(
+              error,
+            )}`,
+          );
+        }
 
-    const { data: updated, error } = await supabaseAdmin
-      .from("patient_profiles")
-      .update(toUiRow(data.profile))
-      .eq("id", data.id)
-      .eq("owner_user_id", userId)
-      .select("*")
-      .maybeSingle();
+        return (
+          data ?? []
+        ).map(
+          (row) => {
+            const profile =
+              fromUiRow(
+                row as unknown as Record<
+                  string,
+                  unknown
+                >,
+              );
 
-    if (error) {
-      throw new Error(`Unable to update patient: ${databaseError(error)}`);
-    }
+            if (!profile) {
+              throw new Error(
+                "Unable to read patient profile.",
+              );
+            }
 
-    if (!updated) {
-      throw new Error("Patient profile was not found.");
-    }
+            const record =
+              row as unknown as Record<
+                string,
+                unknown
+              >;
 
-    return fromUiRow(updated as unknown as Record<string, unknown>);
-  });
+            return {
+              ...profile,
 
-export const deletePatientProfile = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({ id: z.string().uuid() }))
-  .handler(async ({ data, context }) => {
-    const userId = requireUserId(context);
-    const supabaseAdmin = await getSupabaseAdmin();
+              ownerUserId:
+                String(
+                  record[
+                    "owner_user_id"
+                  ] ?? "",
+                ),
 
-    const { error } = await supabaseAdmin
-      .from("patient_profiles")
-      .delete()
-      .eq("id", data.id)
-      .eq("owner_user_id", userId);
+              createdAt:
+                String(
+                  record[
+                    "created_at"
+                  ] ?? "",
+                ),
 
-    if (error) {
-      throw new Error(`Unable to delete patient: ${databaseError(error)}`);
-    }
+              updatedAt:
+                String(
+                  record[
+                    "updated_at"
+                  ] ?? "",
+                ),
+            };
+          },
+        );
+      },
+    );
 
-    return { success: true };
-  });
+/* -------------------------------------------------------------------------- */
+/*                              Get Patient                                   */
+/* -------------------------------------------------------------------------- */
+
+export const getPatient =
+  createServerFn({
+    method: "GET",
+  })
+    .middleware([
+      requireSupabaseAuth,
+    ])
+    .inputValidator(
+      z.object({
+        id: z.string().uuid(),
+      }),
+    )
+    .handler(
+      async ({
+        data,
+        context,
+      }) => {
+        const userId =
+          requireUserId(
+            context,
+          );
+
+        const supabaseAdmin =
+          await getSupabaseAdmin();
+
+        /*
+         * SECURITY:
+         *
+         * Patient ID + authenticated owner ID
+         * are both required.
+         *
+         * Therefore another user's patient
+         * cannot be loaded by guessing a UUID.
+         */
+        const patient =
+          await getOwnedPatientRow(
+            supabaseAdmin,
+            userId,
+            data.id,
+          );
+
+        return fromUiRow(
+          patient as unknown as Record<
+            string,
+            unknown
+          >,
+        );
+      },
+    );
+
+/* -------------------------------------------------------------------------- */
+/*                         Create Patient Profile                             */
+/* -------------------------------------------------------------------------- */
+
+export const createPatientProfile =
+  createServerFn({
+    method: "POST",
+  })
+    .middleware([
+      requireSupabaseAuth,
+    ])
+    .inputValidator(
+      UiProfileSchema,
+    )
+    .handler(
+      async ({
+        data,
+        context,
+      }) => {
+        const userId =
+          requireUserId(
+            context,
+          );
+
+        const supabaseAdmin =
+          await getSupabaseAdmin();
+
+        /*
+         * The browser supplies only profile
+         * fields.
+         *
+         * owner_user_id is ALWAYS taken from
+         * authenticated server context.
+         */
+        const {
+          updated_at,
+          ...row
+        } =
+          toUiRow(data);
+
+        const {
+          data: inserted,
+          error,
+        } =
+          await supabaseAdmin
+            .from(
+              "patient_profiles",
+            )
+            .insert({
+              owner_user_id:
+                userId,
+
+              ...row,
+            })
+            .select("*")
+            .single();
+
+        if (error) {
+          throw new Error(
+            `Unable to create patient: ${databaseError(
+              error,
+            )}`,
+          );
+        }
+
+        return fromUiRow(
+          inserted as unknown as Record<
+            string,
+            unknown
+          >,
+        );
+      },
+    );
+
+/* -------------------------------------------------------------------------- */
+/*                         Update Patient Profile                             */
+/* -------------------------------------------------------------------------- */
+
+export const updatePatientProfile =
+  createServerFn({
+    method: "POST",
+  })
+    .middleware([
+      requireSupabaseAuth,
+    ])
+    .inputValidator(
+      z.object({
+        id: z.string().uuid(),
+
+        profile:
+          UiProfileSchema,
+      }),
+    )
+    .handler(
+      async ({
+        data,
+        context,
+      }) => {
+        const userId =
+          requireUserId(
+            context,
+          );
+
+        const supabaseAdmin =
+          await getSupabaseAdmin();
+
+        /*
+         * SECURITY:
+         *
+         * Before updating, both patient ID
+         * and authenticated owner ID are used.
+         */
+        const payload =
+          toUiRow(
+            data.profile,
+          );
+
+        const {
+          data: updated,
+          error,
+        } =
+          await supabaseAdmin
+            .from(
+              "patient_profiles",
+            )
+            .update(payload)
+            .eq(
+              "id",
+              data.id,
+            )
+            .eq(
+              "owner_user_id",
+              userId,
+            )
+            .select("*")
+            .maybeSingle();
+
+        if (error) {
+          throw new Error(
+            `Unable to update patient: ${databaseError(
+              error,
+            )}`,
+          );
+        }
+
+        if (!updated) {
+          throw new Error(
+            "Patient profile was not found or you do not have access to it.",
+          );
+        }
+
+        return fromUiRow(
+          updated as unknown as Record<
+            string,
+            unknown
+          >,
+        );
+      },
+    );
+
+/* -------------------------------------------------------------------------- */
+/*                         Delete Patient Profile                             */
+/* -------------------------------------------------------------------------- */
+
+export const deletePatientProfile =
+  createServerFn({
+    method: "POST",
+  })
+    .middleware([
+      requireSupabaseAuth,
+    ])
+    .inputValidator(
+      z.object({
+        id: z.string().uuid(),
+      }),
+    )
+    .handler(
+      async ({
+        data,
+        context,
+      }) => {
+        const userId =
+          requireUserId(
+            context,
+          );
+
+        const supabaseAdmin =
+          await getSupabaseAdmin();
+
+        /*
+         * SECURITY:
+         *
+         * Delete is explicitly owner-scoped.
+         *
+         * symptom_checks.patient_id has the
+         * database cascade configured, so deleting
+         * the patient removes only that patient's
+         * dependent checks.
+         */
+        const {
+          error,
+          count,
+        } =
+          await supabaseAdmin
+            .from(
+              "patient_profiles",
+            )
+            .delete({
+              count: "exact",
+            })
+            .eq(
+              "id",
+              data.id,
+            )
+            .eq(
+              "owner_user_id",
+              userId,
+            );
+
+        if (error) {
+          throw new Error(
+            `Unable to delete patient: ${databaseError(
+              error,
+            )}`,
+          );
+        }
+
+        /*
+         * A successful DELETE with zero affected
+         * rows means the patient did not belong to
+         * this authenticated user (or was already gone).
+         *
+         * Do not silently claim that a patient was deleted.
+         */
+        if (
+          count === 0
+        ) {
+          throw new Error(
+            "Patient profile was not found or you do not have access to it.",
+          );
+        }
+
+        return {
+          success: true,
+        };
+      },
+    );
