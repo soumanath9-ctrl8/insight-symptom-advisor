@@ -1924,7 +1924,7 @@ export function calculateHealthTrendFromAssessment(
       typeof safetyScreen
     >;
 
-    worsening?: boolean;
+    worsening?: boolean | undefined;
   },
 ): number {
   return calculateHealthTrendScore({
