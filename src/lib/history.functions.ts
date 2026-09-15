@@ -25,6 +25,7 @@ const UrgencySchema = z.enum([
  *
  * 0-100 Symptom Match Strength.
  *
+ * IMPORTANT:
  * This is NOT diagnostic probability.
  */
 const MatchStrengthSchema = z
@@ -38,9 +39,9 @@ const MatchStrengthSchema = z
  * Legacy records may contain NULL.
  *
  * IMPORTANT:
- * SaveCheck no longer trusts this value as the
- * source of truth. New values are calculated
- * server-side inside this file.
+ * This field is accepted only for backwards compatibility.
+ * The server NEVER trusts the browser-supplied value when
+ * creating a new history record.
  */
 const HealthTrendScoreSchema = z
   .number()
@@ -87,12 +88,12 @@ const SaveCheckSchema = z
         .default(0),
 
     /**
-     * Kept for backwards client compatibility.
+     * Kept only for backwards client compatibility.
      *
      * IMPORTANT:
-     * New saves do NOT trust this value.
-     *
-     * The server calculates its own trend score below.
+     * This value is intentionally ignored by saveCheck().
+     * New Health Condition Trend values are calculated
+     * server-side.
      */
     healthTrendScore:
       HealthTrendScoreSchema,
@@ -176,7 +177,13 @@ const SaveCheckSchema = z
       .nullable(),
   })
   .superRefine(
-    (value, ctx) => {
+    (
+      value,
+      ctx,
+    ) => {
+      /**
+       * Self history MUST NEVER contain a patient ID.
+       */
       if (
         value.subjectType ===
           "self" &&
@@ -198,6 +205,9 @@ const SaveCheckSchema = z
         });
       }
 
+      /**
+       * Patient history MUST contain a patient ID.
+       */
       if (
         value.subjectType ===
           "patient" &&
@@ -250,14 +260,17 @@ export type HistoryCheck = {
   duration?: string;
 
   /**
+   * Existing 0-100 metric.
+   *
    * Symptom Match Strength.
    */
   severity: number;
 
   /**
-   * Health Condition Trend.
+   * Independent 0-100 Health Condition Trend.
    *
-   * null = legacy record with no saved trend.
+   * null means the database record is legacy data
+   * where no trend score was stored.
    */
   healthTrendScore:
     | number
@@ -313,7 +326,11 @@ function clampScore(
       ? value
       : Number(value);
 
-  if (!Number.isFinite(numeric)) {
+  if (
+    !Number.isFinite(
+      numeric,
+    )
+  ) {
     return 0;
   }
 
@@ -350,7 +367,11 @@ function normalizeUrgency(
 function normalizeAnswers(
   value: unknown,
 ): HistoryAnswer[] {
-  if (!Array.isArray(value)) {
+  if (
+    !Array.isArray(
+      value,
+    )
+  ) {
     return [];
   }
 
@@ -388,7 +409,11 @@ function normalizeStringArray(
   value: unknown,
   max = 30,
 ): string[] {
-  if (!Array.isArray(value)) {
+  if (
+    !Array.isArray(
+      value,
+    )
+  ) {
     return [];
   }
 
@@ -444,43 +469,82 @@ function normalizeVitals(
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/*                       Trend calculation — server only                     */
-/* -------------------------------------------------------------------------- */
+/**
+ * Safely convert a database timestamp to ISO.
+ *
+ * If a malformed timestamp somehow reaches the mapper,
+ * history loading should not crash.
+ */
+function safeIsoDate(
+  value: unknown,
+): string {
+  if (
+    typeof value !==
+    "string" &&
+    !(value instanceof Date)
+  ) {
+    return new Date().toISOString();
+  }
 
-type TrendUrgency =
-  | "self-care"
-  | "see-a-doctor"
-  | "urgent"
-  | "emergency";
+  const date =
+    value instanceof Date
+      ? value
+      : new Date(value);
+
+  if (
+    Number.isNaN(
+      date.getTime(),
+    )
+  ) {
+    return new Date().toISOString();
+  }
+
+  return date.toISOString();
+}
+
+/* -------------------------------------------------------------------------- */
+/*                       Health Condition Trend                               */
+/* -------------------------------------------------------------------------- */
 
 /**
- * Same Health Condition Trend formula used by the
- * assessment pipeline.
+ * Health Condition Trend is a NON-CLINICAL trend indicator.
  *
- * IMPORTANT:
+ * It is NOT:
+ * - diagnosis
+ * - disease probability
+ * - medical severity score
+ * - risk percentage
  *
- * severity here means patient-reported severity
- * only if available.
+ * It is intentionally based on:
+ * - urgency
+ * - stored red-flag findings
+ * - patient-reported worsening
  *
- * The existing DB `severity` field is Symptom Match
- * Strength, so it MUST NOT be used as self-rated severity.
- *
- * Therefore new history saves intentionally use a
- * neutral severity baseline.
+ * The existing `severity` field is deliberately NOT used
+ * because that field represents Symptom Match Strength.
+ */
+
+type TrendInput = {
+  urgency: Urgency;
+
+  redFlagCount: number;
+
+  worsening: boolean;
+};
+
+/**
+ * This baseline and penalty structure intentionally matches
+ * the Health Condition Trend calculation used by the
+ * symptom assessment pipeline.
  */
 function calculateServerHealthTrendScore(
-  input: {
-    urgency: TrendUrgency;
-
-    redFlagCount: number;
-
-    worsening: boolean;
-  },
+  input: TrendInput,
 ): number {
-  /*
-   * Neutral baseline because the history schema's
-   * existing `severity` field is NOT patient severity.
+  /**
+   * Neutral starting point.
+   *
+   * We do NOT use the existing `severity` field because
+   * that field is Symptom Match Strength.
    */
   const baseline = 70;
 
@@ -494,97 +558,250 @@ function calculateServerHealthTrendScore(
       break;
 
     case "see-a-doctor":
-      urgencyPenalty = 6;
+      urgencyPenalty = 8;
       break;
 
     case "urgent":
-      urgencyPenalty = 18;
+      urgencyPenalty = 20;
       break;
 
     case "emergency":
-      urgencyPenalty = 45;
+      urgencyPenalty = 50;
       break;
 
     default:
       urgencyPenalty = 0;
   }
 
-  const safeRedFlagCount =
-    Math.max(
-      0,
-      Math.floor(
-        Number.isFinite(
-          input.redFlagCount,
+  const redFlagCount =
+    Number.isFinite(
+      input.redFlagCount,
+    )
+      ? Math.max(
+          0,
+          Math.floor(
+            input.redFlagCount,
+          ),
         )
-          ? input.redFlagCount
-          : 0,
-      ),
-    );
+      : 0;
 
+  /**
+   * Maximum red-flag penalty = 30.
+   */
   const redFlagPenalty =
     Math.min(
       30,
-      safeRedFlagCount *
-        10,
+      redFlagCount * 10,
     );
 
+  /**
+   * Worsening is a separate patient-reported signal.
+   */
   const worseningPenalty =
     input.worsening
       ? 8
       : 0;
+
+  const score =
+    baseline -
+    urgencyPenalty -
+    redFlagPenalty -
+    worseningPenalty;
 
   return Math.max(
     0,
     Math.min(
       100,
       Math.round(
-        baseline -
-          urgencyPenalty -
-          redFlagPenalty -
-          worseningPenalty,
+        score,
       ),
     ),
   );
 }
 
+/* -------------------------------------------------------------------------- */
+/*                       Patient-reported worsening                           */
+/* -------------------------------------------------------------------------- */
+
 /**
- * Worsening is derived ONLY from patient-reported
- * symptom text and patient answers.
+ * Worsening detection is deliberately restricted to:
  *
- * Question text is deliberately ignored.
+ * 1. Initial patient-reported symptoms
+ * 2. Patient answers
+ *
+ * Question text is NEVER included.
+ *
+ * The detection also avoids common explicit negations.
  */
-const WORSENING_PATTERNS = [
-  /\bworse\b|\bworsening\b|\bdeteriorat/i,
 
-  /\bnot improving\b|\bno better\b|\bgetting bad\b|\bgetting worse\b/i,
+const WORSENING_PATTERNS =
+  [
+    /\bgetting\s+worse\b/i,
+    /\bgetting\s+bad\b/i,
+    /\bworse\b/i,
+    /\bworst\b/i,
+    /\bworsening\b/i,
+    /\bmore\s+severe\b/i,
+    /\bincreasing\b/i,
+    /\bincreased\b/i,
+    /\bprogressively\b/i,
+    /\bdeteriorat/i,
+    /\bdeclining\b/i,
+    /\bdecline\b/i,
+    /\bnot\s+improving\b/i,
+    /\bno\s+better\b/i,
 
-  /খারাপ হচ্ছে|আরও খারাপ|উন্নতি হচ্ছে না|অবনতি হচ্ছে|অবস্থা খারাপ/,
-];
+    /খারাপ হচ্ছে/,
+    /খারাপ হয়েছে/,
+    /আরও খারাপ/,
+    /বেশি খারাপ/,
+    /ক্রমশ খারাপ/,
+    /বাড়ছে/,
+    /বেড়েছে/,
+    /তীব্র হচ্ছে/,
+    /তীব্র হয়েছে/,
+    /অবনতি/,
+    /উন্নতি হচ্ছে না/,
+  ];
 
+/**
+ * Explicit negations that should suppress a nearby
+ * worsening expression.
+ */
+const WORSENING_NEGATION_PATTERNS =
+  [
+    /\bnot\b/i,
+    /\bno\b/i,
+    /\bnever\b/i,
+    /\bwithout\b/i,
+    /\bdenies\b/i,
+    /\bdenied\b/i,
+
+    /নয়/,
+    /নেই/,
+    /না/,
+    /হয়নি/,
+    /হয় না/,
+    /কমেছে/,
+    /ভালো হয়েছে/,
+    /উন্নতি হয়েছে/,
+    /উন্নতি হচ্ছে/,
+  ];
+
+function hasLocalWorseningNegation(
+  text: string,
+  matchStart: number,
+): boolean {
+  /**
+   * Only inspect a small local window immediately
+   * before the matched worsening phrase.
+   *
+   * This prevents a negation in a completely unrelated
+   * sentence from suppressing a genuine later worsening.
+   */
+  const windowStart =
+    Math.max(
+      0,
+      matchStart - 80,
+    );
+
+  const before =
+    text.slice(
+      windowStart,
+      matchStart,
+    );
+
+  return WORSENING_NEGATION_PATTERNS.some(
+    (pattern) =>
+      pattern.test(
+        before,
+      ),
+  );
+}
+
+function containsReportedWorsening(
+  text: string,
+): boolean {
+  if (!text.trim()) {
+    return false;
+  }
+
+  for (
+    const pattern of WORSENING_PATTERNS
+  ) {
+    /**
+     * Reset lastIndex in case a regex becomes global
+     * in a future edit.
+     */
+    pattern.lastIndex = 0;
+
+    const match =
+      pattern.exec(
+        text,
+      );
+
+    if (!match) {
+      continue;
+    }
+
+    const matchStart =
+      match.index;
+
+    if (
+      !hasLocalWorseningNegation(
+        text,
+        matchStart,
+      )
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Derive worsening ONLY from patient-reported data.
+ */
 function detectReportedWorsening(
   symptoms: string,
   answers: HistoryAnswer[],
 ): boolean {
-  const text = [
-    symptoms,
+  const patientReportedText =
+    [
+      symptoms.trim(),
 
-    ...answers.map(
-      (item) =>
-        item.answer,
-    ),
-  ].join("\n");
+      ...answers
+        .map(
+          (
+            item,
+          ) =>
+            item.answer.trim(),
+        )
+        .filter(Boolean),
+    ]
+      .filter(Boolean)
+      .join("\n");
 
-  return WORSENING_PATTERNS.some(
-    (pattern) =>
-      pattern.test(text),
+  return containsReportedWorsening(
+    patientReportedText,
   );
 }
 
+/* -------------------------------------------------------------------------- */
+/*                         Stored red-flag count                              */
+/* -------------------------------------------------------------------------- */
+
 /**
- * Only deterministic-looking stored red flags are counted
- * for the server-side trend pipeline.
+ * The history record stores both:
  *
- * We use the actual red_flags array plus the red_flag boolean.
+ * - red_flag
+ * - red_flags[]
+ *
+ * For trend calculation, the actual list is preferred.
+ *
+ * This keeps the stored trend calculation consistent even
+ * if the boolean and array were supplied inconsistently.
  */
 function countStoredRedFlags(
   redFlag: boolean,
@@ -605,15 +822,29 @@ function countStoredRedFlags(
     : 0;
 }
 
+/* -------------------------------------------------------------------------- */
+/*                            History Row Mapper                              */
+/* -------------------------------------------------------------------------- */
+
 function mapHistoryRow(
   row: any,
 ): HistoryCheck {
   const createdAt =
-    row.created_at
-      ? new Date(
-          row.created_at,
-        ).toISOString()
-      : new Date().toISOString();
+    safeIsoDate(
+      row.created_at,
+    );
+
+  const redFlags =
+    normalizeStringArray(
+      row.red_flags,
+    );
+
+  const redFlag =
+    Boolean(
+      row.red_flag,
+    ) ||
+    redFlags.length >
+      0;
 
   return {
     id:
@@ -621,14 +852,23 @@ function mapHistoryRow(
 
     createdAt,
 
+    /**
+     * History graph uses chronological createdAt.
+     */
     date:
       createdAt,
 
     symptoms:
-      row.symptoms ?? "",
+      typeof row.symptoms ===
+      "string"
+        ? row.symptoms
+        : "",
 
     duration:
-      row.duration ?? "",
+      typeof row.duration ===
+      "string"
+        ? row.duration
+        : "",
 
     /**
      * Existing metric remains unchanged.
@@ -641,9 +881,12 @@ function mapHistoryRow(
       ),
 
     /**
-     * NEVER fallback to severity.
+     * IMPORTANT:
      *
-     * Old records without a trend remain null.
+     * NEVER derive a missing historical trend
+     * from severity or another field.
+     *
+     * Old records without health_trend_score remain null.
      */
     healthTrendScore:
       row.health_trend_score ===
@@ -661,26 +904,25 @@ function mapHistoryRow(
       ),
 
     topCondition:
-      row.top_condition ??
-      "",
+      typeof row.top_condition ===
+      "string"
+        ? row.top_condition
+        : "",
 
     summary:
-      row.summary ?? "",
+      typeof row.summary ===
+      "string"
+        ? row.summary
+        : "",
 
     answers:
       normalizeAnswers(
         row.answers,
       ),
 
-    redFlag:
-      Boolean(
-        row.red_flag,
-      ),
+    redFlag,
 
-    redFlags:
-      normalizeStringArray(
-        row.red_flags,
-      ),
+    redFlags,
 
     categories:
       normalizeStringArray(
@@ -693,10 +935,16 @@ function mapHistoryRow(
       ),
 
     uncertainty:
-      row.uncertainty ?? "",
+      typeof row.uncertainty ===
+      "string"
+        ? row.uncertainty
+        : "",
 
     nextStep:
-      row.next_step ?? "",
+      typeof row.next_step ===
+      "string"
+        ? row.next_step
+        : "",
 
     vitals:
       normalizeVitals(
@@ -710,7 +958,8 @@ function mapHistoryRow(
         : "self",
 
     patientId:
-      row.patient_id ?? null,
+      row.patient_id ??
+      null,
   };
 }
 
@@ -771,6 +1020,15 @@ export const listChecks =
       } =
         await requireSupabaseAuth();
 
+      /**
+       * STRICT SELF HISTORY FILTER:
+       *
+       * user_id = current authenticated user
+       * subject_type = self
+       * patient_id IS NULL
+       *
+       * Therefore patient history cannot enter this result.
+       */
       const {
         data,
         error,
@@ -833,12 +1091,27 @@ export const listPatientChecks =
         } =
           await requireSupabaseAuth();
 
+        /**
+         * Verify that this patient belongs to
+         * the authenticated user.
+         */
         await verifyOwnedPatient(
           supabase,
           user.id,
           data.patientId,
         );
 
+        /**
+         * STRICT PATIENT HISTORY FILTER:
+         *
+         * user_id = current authenticated user
+         * subject_type = patient
+         * patient_id = requested patient
+         *
+         * Therefore:
+         * - self history cannot enter
+         * - another patient's history cannot enter
+         */
         const {
           data: rows,
           error,
@@ -901,6 +1174,9 @@ export const saveCheck =
         } =
           await requireSupabaseAuth();
 
+        /**
+         * Validate again on the server.
+         */
         const parsed =
           SaveCheckSchema.parse(
             data,
@@ -929,6 +1205,11 @@ export const saveCheck =
             );
           }
 
+          /**
+           * Server-side ownership check.
+           *
+           * A browser cannot choose another user's patient.
+           */
           await verifyOwnedPatient(
             supabase,
             user.id,
@@ -947,9 +1228,19 @@ export const saveCheck =
           subjectType ===
           "self"
         ) {
+          /**
+           * Explicitly force NULL.
+           *
+           * A malicious/stale patientId from the client
+           * cannot be persisted on a self record.
+           */
           patientId =
             null;
         }
+
+        /* ------------------------------------------------------------------ */
+        /* Normalize patient answers                                           */
+        /* ------------------------------------------------------------------ */
 
         const answers =
           (
@@ -959,6 +1250,10 @@ export const saveCheck =
             .slice(0, 6)
             .map(
               (item) => ({
+                /**
+                 * The question is stored for history/report
+                 * display only.
+                 */
                 question:
                   item.question
                     .trim()
@@ -967,6 +1262,9 @@ export const saveCheck =
                       2000,
                     ),
 
+                /**
+                 * Patient-reported answer.
+                 */
                 answer:
                   item.answer
                     .trim()
@@ -977,27 +1275,43 @@ export const saveCheck =
               }),
             );
 
+        /* ------------------------------------------------------------------ */
+        /* Normalize red flags                                                 */
+        /* ------------------------------------------------------------------ */
+
         const redFlags =
           normalizeStringArray(
             parsed.redFlags,
           );
 
+        /**
+         * Keep boolean and array consistent.
+         *
+         * If red_flags contains findings, red_flag must
+         * also be true.
+         */
         const redFlag =
           Boolean(
             parsed.redFlag,
-          );
+          ) ||
+          redFlags.length >
+            0;
 
-        /*
-         * IMPORTANT STEP 2:
+        /* ------------------------------------------------------------------ */
+        /* Server-authoritative trend calculation                              */
+        /* ------------------------------------------------------------------ */
+
+        /**
+         * IMPORTANT:
          *
-         * Do NOT trust parsed.healthTrendScore.
+         * parsed.healthTrendScore is deliberately NOT used.
          *
-         * It may have been sent by the browser and therefore
-         * cannot be treated as authoritative.
+         * The browser may send any value it wants.
          *
-         * The server independently derives the trend score
-         * from saved triage fields + patient-reported answers.
+         * The server calculates the value from the stored
+         * assessment fields instead.
          */
+
         const worsening =
           detectReportedWorsening(
             parsed.symptoms,
@@ -1022,6 +1336,10 @@ export const saveCheck =
             },
           );
 
+        /* ------------------------------------------------------------------ */
+        /* Build database payload                                              */
+        /* ------------------------------------------------------------------ */
+
         const insertPayload = {
           user_id:
             user.id,
@@ -1035,8 +1353,12 @@ export const saveCheck =
               ?.trim() ?? "",
 
           /**
-           * Existing metric:
+           * Existing 0-100 metric.
+           *
            * Symptom Match Strength.
+           *
+           * This remains untouched so existing history
+           * graph data is preserved.
            */
           severity:
             clampScore(
@@ -1044,10 +1366,11 @@ export const saveCheck =
             ),
 
           /**
-           * SERVER-AUTHORITATIVE Health Condition Trend.
+           * NEW:
            *
-           * Browser-supplied healthTrendScore is deliberately
-           * ignored for new saves.
+           * Server-calculated Health Condition Trend.
+           *
+           * Browser value is ignored.
            */
           health_trend_score:
             serverHealthTrendScore,
@@ -1094,12 +1417,23 @@ export const saveCheck =
               parsed.vitals,
             ),
 
+          /**
+           * Explicit subject separation.
+           */
           subject_type:
             subjectType,
 
+          /**
+           * Self => NULL
+           * Patient => verified patient UUID
+           */
           patient_id:
             patientId,
         };
+
+        /* ------------------------------------------------------------------ */
+        /* Insert                                                              */
+        /* ------------------------------------------------------------------ */
 
         const {
           data: inserted,
@@ -1122,6 +1456,10 @@ export const saveCheck =
           );
         }
 
+        /**
+         * Never mark a save as successful without
+         * an actual database ID.
+         */
         if (
           !inserted?.id
         ) {
@@ -1130,14 +1468,18 @@ export const saveCheck =
           );
         }
 
-        /*
-         * Return the actual inserted database ID and the
-         * actual server-calculated trend value.
-         */
+        /* ------------------------------------------------------------------ */
+        /* Return actual persisted values                                      */
+        /* ------------------------------------------------------------------ */
+
         return {
           id:
             inserted.id,
 
+          /**
+           * Return the value actually persisted by
+           * the database response.
+           */
           healthTrendScore:
             inserted.health_trend_score ===
               null ||
@@ -1175,6 +1517,11 @@ export const deleteCheck =
         } =
           await requireSupabaseAuth();
 
+        /**
+         * First find the record under the current user.
+         *
+         * This prevents deleting another user's record.
+         */
         const {
           data: existing,
           error:
@@ -1208,6 +1555,10 @@ export const deleteCheck =
           );
         }
 
+        /**
+         * For patient records, verify patient ownership
+         * again before deletion.
+         */
         if (
           existing.subject_type ===
             "patient" &&
@@ -1220,6 +1571,9 @@ export const deleteCheck =
           );
         }
 
+        /**
+         * Owner-scoped delete.
+         */
         const {
           error:
             deleteError,
@@ -1332,6 +1686,10 @@ export const getPatientHistoryCount =
         } =
           await requireSupabaseAuth();
 
+        /**
+         * Verify ownership before returning
+         * patient-specific history count.
+         */
         await verifyOwnedPatient(
           supabase,
           user.id,
