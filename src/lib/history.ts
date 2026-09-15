@@ -20,14 +20,19 @@ export type HistorySubjectType =
  *
  * IMPORTANT:
  *
- * `severity` is kept as the existing database/application field name
- * for compatibility, but its value represents the 0–100 symptom-match
- * strength saved for that assessment.
+ * `severity` is retained as the existing database/application
+ * field name for backward compatibility.
+ *
+ * In the current application its value means:
+ *
+ *   0–100 Symptom Match Strength
  *
  * It is NOT:
- * - a medical severity score
- * - a diagnosis probability
- * - a clinically validated risk percentage
+ * - medical severity
+ * - disease probability
+ * - diagnosis probability
+ * - medical risk
+ * - AI-assessed risk
  */
 export type HistoryEntry = {
   id: string;
@@ -37,27 +42,25 @@ export type HistoryEntry = {
   symptoms: string;
 
   /**
-   * Existing DB field name.
+   * Existing database field name retained for compatibility.
    *
    * Application meaning:
-   * 0–100 symptom-match strength.
+   * 0–100 Symptom Match Strength.
    */
   severity: number;
 
   /**
-   * NEW:
-   *
    * Independent 0–100 Health Condition Trend score.
    *
    * Higher = better reported health trend.
    * Lower = worse reported health trend.
    *
-   * NULL/undefined means that the record is a legacy
-   * record for which no Health Trend was calculated.
+   * Legacy records may have null/undefined here.
    *
    * IMPORTANT:
    *
-   * This must NEVER fall back to `severity`.
+   * A missing Health Condition Trend score must remain missing.
+   * It must NEVER fall back to `severity`.
    */
   healthTrendScore?: number | null;
 
@@ -69,8 +72,8 @@ export type HistoryEntry = {
 
   /**
    * Determines whether this entry belongs to:
-   * - the logged-in user
-   * - a separately stored patient
+   * - the logged-in user (`self`)
+   * - a separately stored patient (`patient`)
    */
   subjectType: HistorySubjectType;
 
@@ -83,19 +86,25 @@ export type HistoryEntry = {
 };
 
 /* -------------------------------------------------------------------------- */
-/*                              Top Condition                                 */
+/*                         Match Strength / Top Condition                     */
 /* -------------------------------------------------------------------------- */
 
 /**
  * Returns the condition with the highest model-reported
- * symptom-match strength.
- *
- * The returned likelihood is normalized to 0–100.
+ * Symptom Match Strength.
  *
  * IMPORTANT:
  *
- * This is a symptom-match strength, NOT a clinically validated
- * probability of having a disease.
+ * The returned value is 0–100 Symptom Match Strength.
+ *
+ * It is NOT:
+ * - a diagnosis
+ * - disease probability
+ * - medical risk
+ * - prognosis
+ *
+ * The function name `topRisk` is retained for backward
+ * compatibility with existing imports in the checker.
  */
 export function topRisk(
   assessment: Assessment,
@@ -142,10 +151,10 @@ export function topRisk(
 /* -------------------------------------------------------------------------- */
 
 /**
- * Normalize a stored history match-strength value.
+ * Normalize a stored Symptom Match Strength value.
  *
  * The database field is called `severity` for backward compatibility,
- * but the application treats it as a 0–100 symptom-match strength.
+ * but the application treats it as a 0–100 Symptom Match Strength.
  *
  * IMPORTANT:
  *
@@ -174,10 +183,10 @@ export function historyMatchStrength(
 }
 
 /**
- * Human-readable match-strength label.
+ * Human-readable Symptom Match Strength label.
  *
  * These labels describe model symptom matching only.
- * They do NOT describe disease probability.
+ * They do NOT describe disease probability or medical risk.
  */
 export function historyLabel(
   entry: HistoryEntry,
@@ -214,7 +223,7 @@ export function historyLabel(
  * Higher score = better reported health trend.
  * Lower score = worse reported health trend.
  *
- * A legacy record without a Health Trend remains `null`.
+ * A legacy record without a Health Condition Trend remains null.
  *
  * We intentionally DO NOT do:
  *
@@ -258,11 +267,8 @@ export function historyHealthTrendScore(
  * Returns true when a history entry contains a valid
  * Health Condition Trend score.
  *
- * This is useful for graph rendering.
- *
- * Legacy entries with NULL trend scores should be
- * excluded from the Health Condition Trend graph
- * rather than using their old Symptom Match Strength.
+ * Legacy entries with NULL trend scores must be excluded
+ * from the Health Condition Trend graph.
  */
 export function hasHealthTrendScore(
   entry: HistoryEntry,
