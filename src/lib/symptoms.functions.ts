@@ -1916,7 +1916,7 @@ export function calculateHealthTrendScore(
  */
 export function calculateHealthTrendFromAssessment(
   input: {
-    severity?: number;
+    severity?: number | undefined;
 
     assessment: Assessment;
 
@@ -1924,7 +1924,7 @@ export function calculateHealthTrendFromAssessment(
       typeof safetyScreen
     >;
 
-    worsening?: boolean;
+    worsening?: boolean | undefined;
   },
 ): number {
   return calculateHealthTrendScore({
