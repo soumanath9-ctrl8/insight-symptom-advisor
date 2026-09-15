@@ -24,7 +24,6 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  Clock3,
   HeartPulse,
   Info,
   Loader2,
@@ -198,6 +197,14 @@ function PatientChecker({
   /*                              Patient Query                               */
   /* ------------------------------------------------------------------------ */
 
+  /*
+   * IMPORTANT:
+   *
+   * The patient profile is fetched using the patient ID, but the actual
+   * ownership check happens inside getPatient on the server.
+   *
+   * The client never supplies owner_user_id.
+   */
   const patientQuery =
     useQuery({
       queryKey: [
@@ -322,6 +329,18 @@ function PatientChecker({
   /*                         Base Patient Input                               */
   /* ------------------------------------------------------------------------ */
 
+  /*
+   * IMPORTANT SECURITY BOUNDARY:
+   *
+   * patientId is the ONLY patient identifier sent from this route.
+   *
+   * Age, sex, allergies, medications, previous illnesses, smoking,
+   * family history and pregnancy information are deliberately NOT copied
+   * into this client-side payload.
+   *
+   * assessPatientSymptoms() and getPatientFollowUpQuestions() must load
+   * the owned patient profile server-side.
+   */
   const baseInput =
     useMemo(
       () => ({
@@ -351,6 +370,15 @@ function PatientChecker({
   /*                         Answer Pairs                                     */
   /* ------------------------------------------------------------------------ */
 
+  /*
+   * This converts the internal answer map into the server-compatible
+   * question/answer structure.
+   *
+   * Question text is retained here because it is metadata describing
+   * which answer belongs to which question.
+   *
+   * It must NOT be treated as patient-reported symptom evidence.
+   */
   const answerPairs =
     useMemo(
       () =>
@@ -390,15 +418,22 @@ function PatientChecker({
   /* ------------------------------------------------------------------------ */
 
   /*
-   * IMPORTANT:
+   * SAFETY RULE:
    *
-   * Question text is deliberately NOT included here.
+   * Only information actually reported by the patient/user is included.
    *
-   * Otherwise a question such as:
+   * The follow-up QUESTION itself is deliberately excluded.
+   *
+   * Example:
+   *
+   * Question:
    * "Do you have chest pain?"
    *
-   * could incorrectly be interpreted as the patient reporting
-   * chest pain.
+   * Answer:
+   * "No."
+   *
+   * The words "chest pain" from the question must not become evidence
+   * that the patient has chest pain.
    */
   const patientReportedText =
     useMemo(
@@ -453,10 +488,11 @@ function PatientChecker({
     ]);
 
   /*
-   * likelihood here is NOT treated as a calibrated probability.
+   * likelihood is interpreted only as the application's
+   * Symptom Match Strength.
    *
-   * It is stored/displayed only as the application's
-   * symptom-match strength, normalized to 0–100.
+   * It is NOT a calibrated probability and is NOT displayed as
+   * diagnostic risk.
    */
   const matchStrength =
     useMemo(
@@ -471,9 +507,18 @@ function PatientChecker({
     );
 
   /* ------------------------------------------------------------------------ */
-  /*                        Emergency Assessment                             */
+  /*                        Immediate Safety Assessment                       */
   /* ------------------------------------------------------------------------ */
 
+  /*
+   * This generic immediate safety function intentionally receives
+   * symptom/answer content only.
+   *
+   * Patient identity remains isolated in the patient-specific assessment
+   * and history functions.
+   *
+   * No patient profile is guessed or merged on the client.
+   */
   const immediateMutation =
     useMutation({
       mutationFn:
@@ -491,7 +536,9 @@ function PatientChecker({
           },
         ) =>
           Promise.resolve(
-            immediateEmergencyAssessment(input),
+            immediateEmergencyAssessment(
+              input,
+            ),
           ),
     });
 
@@ -557,13 +604,10 @@ function PatientChecker({
           result: Assessment,
         ) => {
           /*
-           * Determine the top condition from the assessment itself.
+           * Determine the strongest condition from the assessment itself.
            *
-           * This replaces the old:
-           *
-           * severity: 1
-           *
-           * temporary value.
+           * This prevents the old temporary severity value from being
+           * written into patient history.
            */
           const top =
             result.conditions?.length
@@ -586,26 +630,63 @@ function PatientChecker({
             );
 
           /*
-           * Extract vitals ONLY from patient-reported information.
+           * Vitals are extracted ONLY from:
            *
-           * No follow-up question text is included.
+           * - patient's original symptom description
+           * - duration
+           * - patient's actual follow-up answers
+           *
+           * Question wording is never included.
            */
           const vitals =
             extractVitals(
               patientReportedText,
             );
 
+          /*
+           * IMPORTANT:
+           *
+           * patientId is taken from the route context.
+           *
+           * The server-side saveCheck() verifies:
+           *
+           * 1. authenticated user owns the patient
+           * 2. subjectType is "patient"
+           * 3. patientId belongs to that authenticated user
+           *
+           * Therefore a malicious client cannot simply save another
+           * user's patient history by changing owner_user_id.
+           */
           return saveFn({
             data: {
               symptoms:
                 symptoms.trim(),
 
               ...(duration.trim()
-                ? { duration: duration.trim() }
+                ? {
+                    duration:
+                      duration.trim(),
+                  }
                 : {}),
 
+              /*
+               * Backward-compatible database field.
+               *
+               * This represents Symptom Match Strength, not risk.
+               */
               severity:
                 savedMatchStrength,
+
+              /*
+               * IMPORTANT:
+               *
+               * Health Condition Trend is calculated server-side by
+               * history.functions.ts.
+               *
+               * The browser does NOT provide or override it.
+               */
+              healthTrendScore:
+                null,
 
               urgency:
                 result.urgency,
@@ -618,8 +699,18 @@ function PatientChecker({
                 result.summary ??
                 "",
 
+              /*
+               * Save the actual follow-up answers.
+               *
+               * This keeps patient history complete and allows the
+               * saved check to preserve what the patient actually said.
+               */
+              answers:
+                answerPairs,
+
               redFlag:
-                result.redFlags.length > 0,
+                result.redFlags.length >
+                0,
 
               redFlags:
                 result.redFlags ??
@@ -627,13 +718,19 @@ function PatientChecker({
 
               categories:
                 result.conditions.map(
-                  (condition) => condition.name,
+                  (
+                    condition,
+                  ) =>
+                    condition.name,
                 ),
 
               supportingFactors:
                 result.conditions[0]
                   ?.contributingFactors.map(
-                    (factor) => factor.factor,
+                    (
+                      factor,
+                    ) =>
+                      factor.factor,
                   ) ?? [],
 
               uncertainty:
@@ -647,9 +744,19 @@ function PatientChecker({
                 result.nextStep ??
                 "",
 
+              /*
+               * HARD DATA-ISOLATION BOUNDARY
+               *
+               * Never use "self" for this route.
+               */
               subjectType:
                 "patient",
 
+              /*
+               * Never pass null or the logged-in user's ID here.
+               *
+               * This is the exact patient being assessed.
+               */
               patientId,
 
               vitals,
@@ -663,10 +770,15 @@ function PatientChecker({
         ) => {
           /*
            * IMPORTANT:
-           * Save state is set from the actual server response ID.
            *
-           * Never use:
+           * Use the actual ID returned by the server.
+           *
+           * Never do:
+           *
            * setSavedId("saved")
+           *
+           * because that would make the UI claim success even when
+           * persistence failed.
            */
           setSavedId(
             saved.id,
@@ -677,7 +789,9 @@ function PatientChecker({
           );
 
           /*
-           * Patient history has its own cache key.
+           * Patient history has its own isolated React Query cache key.
+           *
+           * This invalidation cannot invalidate self history.
            */
           await queryClient.invalidateQueries(
             {
@@ -733,10 +847,13 @@ function PatientChecker({
       }
 
       /*
-       * Generic immediate safety assessment.
+       * Immediate safety screen.
        *
-       * Do NOT pass patientId here because the generic emergency
-       * function does not accept patientId.
+       * This is intentionally based on the patient's reported symptom
+       * information only.
+       *
+       * Patient identity is handled separately by the patient-specific
+       * functions.
        */
       const safety =
         await immediateMutation.mutateAsync(
@@ -745,7 +862,10 @@ function PatientChecker({
               symptoms.trim(),
 
             ...(duration.trim()
-              ? { duration: duration.trim() }
+              ? {
+                  duration:
+                    duration.trim(),
+                }
               : {}),
 
             language:
@@ -756,9 +876,9 @@ function PatientChecker({
         );
 
       /*
-       * Emergency and urgent are intentionally different.
+       * Emergency and urgent are intentionally distinct.
        *
-       * Only emergency immediately ends the normal flow.
+       * Only "emergency" stops the normal follow-up flow immediately.
        */
       if (
         safety?.urgency ===
@@ -776,9 +896,10 @@ function PatientChecker({
       }
 
       /*
-       * Get questions using the patient-specific server function.
-       * That function verifies patient ownership and loads the
-       * patient's profile server-side.
+       * Patient-specific question generation.
+       *
+       * The server function verifies ownership and loads this patient's
+       * profile internally.
        */
       const result =
         await questionsMutation.mutateAsync();
@@ -796,7 +917,7 @@ function PatientChecker({
           );
 
         /*
-         * assessmentMutation handles result state.
+         * assessmentMutation already updates assessment and stage.
          */
         void finalAssessment;
 
@@ -860,6 +981,10 @@ function PatientChecker({
         updatedAnswers,
       );
 
+      /*
+       * Convert the current answer map into the complete answered
+       * question/answer list.
+       */
       const updatedPairs =
         questions
           .map(
@@ -888,11 +1013,12 @@ function PatientChecker({
           );
 
       /*
-       * Immediate safety check uses ONLY patient-reported answers.
+       * Immediate safety check.
        *
-       * The question text is sent as structure to the safety function,
-       * but the emergency/red-flag logic must evaluate the patient's
-       * answer rather than treating the question itself as a symptom.
+       * Question text is structural metadata only.
+       *
+       * The safety implementation must evaluate actual answer content
+       * rather than interpreting the question itself as a symptom.
        */
       const safety =
         await immediateMutation.mutateAsync(
@@ -901,7 +1027,10 @@ function PatientChecker({
               symptoms.trim(),
 
             ...(duration.trim()
-              ? { duration: duration.trim() }
+              ? {
+                  duration:
+                    duration.trim(),
+                }
               : {}),
 
             language:
@@ -914,6 +1043,9 @@ function PatientChecker({
           },
         );
 
+      /*
+       * Emergency response immediately ends the questionnaire.
+       */
       if (
         safety?.urgency ===
         "emergency"
@@ -929,6 +1061,9 @@ function PatientChecker({
         return;
       }
 
+      /*
+       * Continue to the next question if there are unanswered questions.
+       */
       if (
         step <
         questions.length -
@@ -949,6 +1084,12 @@ function PatientChecker({
         return;
       }
 
+      /*
+       * Final assessment receives the patient's actual answers.
+       *
+       * The server-side patient assessment function retrieves the
+       * patient's profile using the verified patientId.
+       */
       await assessmentMutation.mutateAsync(
         updatedPairs,
       );
@@ -1815,10 +1956,10 @@ function PatientResult({
                     }
                   </h2>
 
-                      {topCondition.explanation ? (
+                  {topCondition.explanation ? (
                     <p className="mt-1 text-sm leading-6 text-muted-foreground">
                       {
-                          topCondition.explanation
+                        topCondition.explanation
                       }
                     </p>
                   ) : null}
