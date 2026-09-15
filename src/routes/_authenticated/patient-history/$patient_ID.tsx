@@ -53,35 +53,20 @@ import { Separator } from "@/components/ui/separator";
  *
  * PATIENT HISTORY ONLY
  *
- * Patient Symptom Checker:
- * /patient-checker/$patient_ID
- *
- * Patient History:
  * /patient-history/$patient_ID
- *
- * IMPORTANT DATA-ISOLATION RULE
  *
  * This route NEVER calls listChecks().
  *
- * It only calls listPatientChecks() with the selected
- * patient ID.
+ * It only calls:
  *
- * The server is responsible for verifying that:
+ * listPatientChecks({
+ *   data: {
+ *     patientId
+ *   }
+ * })
  *
- * 1. The logged-in user is authenticated.
- * 2. The selected patient exists.
- * 3. The selected patient belongs to the logged-in user.
- * 4. Only checks belonging to that patient are returned.
- *
- * Therefore:
- *
- * SELF HISTORY
- *     -> listChecks()
- *
- * PATIENT HISTORY
- *     -> listPatientChecks(patientId)
- *
- * These two histories remain completely separated.
+ * The server verifies that the patient belongs to the
+ * authenticated user before returning any history.
  */
 
 export const Route = createFileRoute(
@@ -90,12 +75,6 @@ export const Route = createFileRoute(
   ssr: false,
 
   beforeLoad: async ({ params }) => {
-    /*
-     * Dynamic route parameters are required.
-     *
-     * If the parameter is missing, do not attempt any
-     * patient query.
-     */
     if (!params.patient_ID) {
       throw redirect({
         to: "/patients",
@@ -103,7 +82,8 @@ export const Route = createFileRoute(
     }
 
     return {
-      patientId: params.patient_ID,
+      patientId:
+        params.patient_ID,
     };
   },
 
@@ -117,8 +97,9 @@ export const Route = createFileRoute(
  */
 
 function PatientHistoryPage() {
-  const { patient_ID: patientId } =
-    Route.useParams();
+  const {
+    patient_ID: patientId,
+  } = Route.useParams();
 
   const queryClient =
     useQueryClient();
@@ -127,92 +108,68 @@ function PatientHistoryPage() {
    * =======================================================
    * PATIENT PROFILE
    * =======================================================
-   *
-   * This query is scoped to the selected patient ID.
-   *
-   * getPatient() performs the owner verification on the
-   * server, so a user cannot use another user's patient ID
-   * to retrieve that patient's profile.
    */
 
-  const patientQuery = useQuery({
-    queryKey: [
-      "patient",
-      patientId,
-    ],
+  const patientQuery =
+    useQuery({
+      queryKey: [
+        "patient",
+        patientId,
+      ],
 
-    enabled:
-      Boolean(patientId),
+      enabled:
+        Boolean(patientId),
 
-    queryFn: () =>
-      getPatient({
-        data: {
-          id: patientId,
-        },
-      }),
-  });
+      queryFn: () =>
+        getPatient({
+          data: {
+            id: patientId,
+          },
+        }),
+    });
 
   /*
    * =======================================================
    * PATIENT-ONLY HISTORY
    * =======================================================
    *
-   * HARD DATA ISOLATION
+   * IMPORTANT:
    *
-   * This query NEVER calls listChecks().
+   * This is completely separate from self history.
    *
-   * The selected patient ID is passed to the server.
+   * Self:
+   *   listChecks()
    *
-   * history.functions.ts then verifies:
-   *
-   * patient_profiles.id = patientId
-   * AND
-   * patient_profiles.owner_user_id = authenticated user
-   *
-   * Only after that verification are the patient's checks
-   * returned.
+   * Patient:
+   *   listPatientChecks(patientId)
    */
 
-  const historyQuery = useQuery({
-    queryKey: [
-      "patient-checks",
-      patientId,
-    ],
+  const historyQuery =
+    useQuery({
+      queryKey: [
+        "patient-checks",
+        patientId,
+      ],
 
-    enabled:
-      Boolean(patientId),
+      enabled:
+        Boolean(patientId),
 
-    queryFn: () =>
-      listPatientChecks({
-        data: {
-          patientId,
-        },
-      }),
-  });
+      queryFn: () =>
+        listPatientChecks({
+          data: {
+            patientId,
+          },
+        }),
+    });
 
   /*
    * =======================================================
-   * DELETE PATIENT HISTORY
+   * DELETE PATIENT CHECK
    * =======================================================
    *
-   * deleteCheck() performs owner-scoped authorization on
-   * the server.
+   * Server-side deleteCheck() determines ownership.
    *
-   * This page does NOT send:
-   *
-   * - user ID
-   * - owner ID
-   * - arbitrary patient ID
-   *
-   * to authorize deletion.
-   *
-   * The server determines ownership from the authenticated
-   * session.
-   *
-   * After deletion, ONLY this patient's history query is
-   * invalidated.
-   *
-   * Self history is never invalidated or modified here.
+   * This page never sends owner_user_id.
    */
 
   const removeMutation =
@@ -225,18 +182,20 @@ function PatientHistoryPage() {
         }),
 
       onSuccess: async () => {
-        await queryClient.invalidateQueries({
-          queryKey: [
-            "patient-checks",
-            patientId,
-          ],
-        });
+        await queryClient.invalidateQueries(
+          {
+            queryKey: [
+              "patient-checks",
+              patientId,
+            ],
+          },
+        );
       },
     });
 
   /*
    * =======================================================
-   * RAW QUERY DATA
+   * DATA
    * =======================================================
    */
 
@@ -253,39 +212,32 @@ function PatientHistoryPage() {
    *
    * Oldest -> newest.
    *
-   * This order is used for all graphs and calculations.
+   * This is used for graphs and calculations.
    */
 
   const sortedHistory =
     useMemo(() => {
       return [...history].sort(
         (a, b) =>
-          new Date(a.date).getTime() -
-          new Date(b.date).getTime(),
+          new Date(
+            a.date,
+          ).getTime() -
+          new Date(
+            b.date,
+          ).getTime(),
       );
     }, [history]);
 
   /*
    * =======================================================
-   * SYMPTOM MATCH STRENGTH DATA
+   * SYMPTOM MATCH STRENGTH
    * =======================================================
    *
-   * IMPORTANT:
+   * severity is legacy storage terminology.
    *
-   * `severity` is legacy storage terminology.
+   * It is displayed as Symptom Match Strength.
    *
-   * In the current application it represents:
-   *
-   * Symptom Match Strength
-   *
-   * It is NOT:
-   *
-   * - medical risk
-   * - disease probability
-   * - diagnosis probability
-   * - AI assessed risk
-   *
-   * historyMatchStrength() performs the normalization.
+   * It is NOT a diagnosis probability.
    */
 
   const matchStrengthHistory =
@@ -303,29 +255,14 @@ function PatientHistoryPage() {
 
   /*
    * =======================================================
-   * HEALTH CONDITION TREND DATA
+   * HEALTH CONDITION TREND
    * =======================================================
    *
-   * IMPORTANT DATA-PRESERVATION RULE
+   * Only stored healthTrendScore values are used.
    *
-   * Only actually stored healthTrendScore values are used.
+   * Null legacy values remain null.
    *
-   * Legacy records with:
-   *
-   * healthTrendScore = null
-   *
-   * remain null.
-   *
-   * We NEVER calculate a new Health Condition Trend score
-   * from:
-   *
-   * - severity
-   * - Symptom Match Strength
-   * - date
-   * - top condition
-   * - urgency
-   *
-   * This prevents historical data from being fabricated.
+   * No trend score is reconstructed from severity.
    */
 
   const healthTrendHistory =
@@ -345,7 +282,8 @@ function PatientHistoryPage() {
             entry: HistoryEntry;
             value: number;
           } =>
-            item.value !== null,
+            item.value !==
+            null,
         );
     }, [sortedHistory]);
 
@@ -356,9 +294,11 @@ function PatientHistoryPage() {
    */
 
   const latestMatchStrength =
-    matchStrengthHistory.length > 0
+    matchStrengthHistory.length >
+    0
       ? matchStrengthHistory[
-          matchStrengthHistory.length - 1
+          matchStrengthHistory.length -
+            1
         ]?.value ?? 0
       : 0;
 
@@ -369,20 +309,23 @@ function PatientHistoryPage() {
    */
 
   const previousMatchStrength =
-    matchStrengthHistory.length > 1
+    matchStrengthHistory.length >
+    1
       ? matchStrengthHistory[
-          matchStrengthHistory.length - 2
+          matchStrengthHistory.length -
+            2
         ]?.value ?? null
       : null;
 
   /*
    * =======================================================
-   * MATCH STRENGTH TREND
+   * MATCH TREND
    * =======================================================
    */
 
   const matchTrend =
-    previousMatchStrength === null
+    previousMatchStrength ===
+    null
       ? "stable"
       : latestMatchStrength >
           previousMatchStrength
@@ -399,7 +342,8 @@ function PatientHistoryPage() {
    */
 
   const averageMatchStrength =
-    matchStrengthHistory.length > 0
+    matchStrengthHistory.length >
+    0
       ? matchStrengthHistory.reduce(
           (sum, item) =>
             sum + item.value,
@@ -415,9 +359,11 @@ function PatientHistoryPage() {
    */
 
   const latestHealthTrend =
-    healthTrendHistory.length > 0
+    healthTrendHistory.length >
+    0
       ? healthTrendHistory[
-          healthTrendHistory.length - 1
+          healthTrendHistory.length -
+            1
         ]?.value ?? null
       : null;
 
@@ -428,21 +374,25 @@ function PatientHistoryPage() {
    */
 
   const previousHealthTrend =
-    healthTrendHistory.length > 1
+    healthTrendHistory.length >
+    1
       ? healthTrendHistory[
-          healthTrendHistory.length - 2
+          healthTrendHistory.length -
+            2
         ]?.value ?? null
       : null;
 
   /*
    * =======================================================
-   * HEALTH CONDITION TREND DIRECTION
+   * HEALTH TREND DIRECTION
    * =======================================================
    */
 
   const healthTrendDirection =
-    latestHealthTrend === null ||
-    previousHealthTrend === null
+    latestHealthTrend ===
+      null ||
+    previousHealthTrend ===
+      null
       ? "stable"
       : latestHealthTrend >
           previousHealthTrend
@@ -459,7 +409,8 @@ function PatientHistoryPage() {
    */
 
   const averageHealthTrend =
-    healthTrendHistory.length > 0
+    healthTrendHistory.length >
+    0
       ? healthTrendHistory.reduce(
           (sum, item) =>
             sum + item.value,
@@ -474,7 +425,9 @@ function PatientHistoryPage() {
    * =======================================================
    */
 
-  if (patientQuery.isLoading) {
+  if (
+    patientQuery.isLoading
+  ) {
     return (
       <main className="min-h-screen bg-background">
         <ProfileMenu />
@@ -495,17 +448,8 @@ function PatientHistoryPage() {
 
   /*
    * =======================================================
-   * PATIENT PROFILE ACCESS ERROR
+   * PATIENT ACCESS ERROR
    * =======================================================
-   *
-   * We intentionally do not distinguish between:
-   *
-   * - patient does not exist
-   * - patient belongs to another account
-   * - patient cannot be accessed
-   *
-   * This avoids unnecessarily exposing whether another
-   * account's patient ID exists.
    */
 
   if (
@@ -556,7 +500,7 @@ function PatientHistoryPage() {
 
   /*
    * =======================================================
-   * PATIENT HISTORY LOADING
+   * HISTORY LOADING
    * =======================================================
    */
 
@@ -656,9 +600,7 @@ function PatientHistoryPage() {
 
       <div className="mx-auto w-full max-w-4xl space-y-6 px-5 py-8 sm:py-12">
 
-        {/* =================================================
-            BACK TO PATIENT CHECKER
-        ================================================== */}
+        {/* BACK */}
 
         <Button
           asChild
@@ -678,9 +620,7 @@ function PatientHistoryPage() {
           </Link>
         </Button>
 
-        {/* =================================================
-            PATIENT HEADER
-        ================================================== */}
+        {/* PATIENT HEADER */}
 
         <section className="flex items-center gap-4">
           <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -707,9 +647,7 @@ function PatientHistoryPage() {
           </div>
         </section>
 
-        {/* =================================================
-            DATA SEPARATION NOTICE
-        ================================================== */}
+        {/* DATA ISOLATION NOTICE */}
 
         <div className="rounded-xl border bg-muted/40 px-4 py-3">
           <p className="text-sm leading-6 text-muted-foreground">
@@ -722,9 +660,7 @@ function PatientHistoryPage() {
           </p>
         </div>
 
-        {/* =================================================
-            EMPTY HISTORY
-        ================================================== */}
+        {/* EMPTY HISTORY */}
 
         {history.length === 0 ? (
           <Card>
@@ -760,9 +696,7 @@ function PatientHistoryPage() {
           </Card>
         ) : (
           <>
-            {/* =================================================
-                SUMMARY CARDS
-            ================================================== */}
+            {/* SUMMARY CARDS */}
 
             <section
               aria-label="Patient symptom history summary"
@@ -800,9 +734,11 @@ function PatientHistoryPage() {
                 }
                 label="Recent match trend"
                 value={
-                  matchTrend === "up"
+                  matchTrend ===
+                  "up"
                     ? "Higher"
-                    : matchTrend === "down"
+                    : matchTrend ===
+                        "down"
                       ? "Lower"
                       : "Stable"
                 }
@@ -810,6 +746,7 @@ function PatientHistoryPage() {
             </section>
 
             {/* =================================================
+                GRAPH 1
                 HEALTH CONDITION TREND
             ================================================== */}
 
@@ -936,6 +873,7 @@ function PatientHistoryPage() {
             </Card>
 
             {/* =================================================
+                GRAPH 2
                 SYMPTOM MATCH STRENGTH
             ================================================== */}
 
@@ -997,9 +935,7 @@ function PatientHistoryPage() {
               </CardContent>
             </Card>
 
-            {/* =================================================
-                HISTORY OVERVIEW
-            ================================================== */}
+            {/* HISTORY OVERVIEW */}
 
             <Card>
               <CardHeader>
@@ -1053,25 +989,20 @@ function PatientHistoryPage() {
               </div>
 
               {/*
-               * IMPORTANT
+               * IMPORTANT:
                *
-               * SymptomTimeline is intentionally a
-               * SAVED-CHECK LIST ONLY.
+               * SymptomTimeline is now LIST ONLY.
                *
-               * It must NOT render:
+               * Therefore this section contains:
                *
-               * - Symptom Match Strength graph
-               * - Health Condition Trend graph
-               * - AI Risk graph
+               * - saved check cards
                *
-               * The two graphs above are the only graphs
-               * on this patient history page:
+               * and contains NO graph.
+               *
+               * The only graphs on this page are:
                *
                * 1. Health Condition Trend
                * 2. Symptom Match Strength
-               *
-               * This prevents the duplicate graph that was
-               * previously appearing under Saved checks.
                */}
 
               <SymptomTimeline
@@ -1109,9 +1040,7 @@ function PatientHistoryPage() {
           </>
         )}
 
-        {/* =================================================
-            FOOTER ACTIONS
-        ================================================== */}
+        {/* FOOTER ACTIONS */}
 
         <div className="flex flex-col gap-3 sm:flex-row">
           <Button
@@ -1212,9 +1141,11 @@ function TrendSummary({
  * HEALTH CONDITION TREND GRAPH
  * =========================================================
  *
- * Only actual stored healthTrendScore values are rendered.
+ * IMPORTANT:
  *
- * Legacy null values are intentionally excluded.
+ * Only stored healthTrendScore values are displayed.
+ *
+ * Null legacy records are excluded.
  */
 
 function HealthTrendGraph({
@@ -1504,11 +1435,6 @@ function HealthTrendGraph({
  * =========================================================
  * SYMPTOM MATCH STRENGTH GRAPH
  * =========================================================
- *
- * `severity` is interpreted ONLY through
- * historyMatchStrength().
- *
- * It is never treated as Health Condition Trend.
  */
 
 function MatchStrengthGraph({
@@ -1913,10 +1839,8 @@ function formatHistoryDate(
   return new Intl.DateTimeFormat(
     undefined,
     {
-      dateStyle:
-        "medium",
-      timeStyle:
-        "short",
+      dateStyle: "medium",
+      timeStyle: "short",
     },
   ).format(date);
 }
