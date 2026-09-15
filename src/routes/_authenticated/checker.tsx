@@ -24,7 +24,6 @@ import {
 
 import {
   assessSymptoms,
-  calculateHealthTrendScore,
   clarifyAnswers,
   getFollowUpQuestions,
   immediateEmergencyAssessment,
@@ -163,6 +162,13 @@ function riskClasses(
 /*                         Patient-reported helpers                           */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Detects worsening only from patient-reported content.
+ *
+ * Question text is never passed here.
+ * Negation is intentionally conservative because this
+ * helper is only used for the non-clinical trend indicator.
+ */
 function reportedWorsening(
   text: string,
 ): boolean {
@@ -303,13 +309,29 @@ function AppBody() {
   /**
    * null = not saved
    *
-   * Actual UUID = successfully saved.
+   * Actual database UUID = successfully saved.
    */
   const [
     savedId,
     setSavedId,
   ] = useState<
     string | null
+  >(null);
+
+  /**
+   * Server-returned Health Condition Trend.
+   *
+   * This is deliberately separate from the
+   * Symptom Match Strength.
+   *
+   * null means no server-confirmed saved trend
+   * is available yet.
+   */
+  const [
+    savedHealthTrendScore,
+    setSavedHealthTrendScore,
+  ] = useState<
+    number | null
   >(null);
 
   const queryClient =
@@ -389,12 +411,20 @@ function AppBody() {
   /*                     Patient-reported information                         */
   /* ------------------------------------------------------------------------ */
 
-  function buildPatientReportedText() {
+  /**
+   * Only information actually reported by the patient
+   * is included.
+   *
+   * Question text is intentionally excluded.
+   */
+  function buildPatientReportedText(
+    currentAnswers: string[] = answers,
+  ) {
     return [
       symptoms.trim(),
       duration.trim(),
 
-      ...answers
+      ...currentAnswers
         .map(
           (
             answer,
@@ -408,10 +438,23 @@ function AppBody() {
   }
 
   /* ------------------------------------------------------------------------ */
-  /*                     Health Condition Trend                               */
+  /*                   Local display-only trend helper                        */
   /* ------------------------------------------------------------------------ */
 
-  function buildHealthTrendScore(
+  /**
+   * IMPORTANT:
+   *
+   * This value is display-only.
+   *
+   * It is NOT trusted by the database.
+   *
+   * The authoritative value used for history is calculated
+   * server-side by saveCheck().
+   *
+   * The local value is kept only so the result page can
+   * immediately display the trend before the user saves.
+   */
+  function buildDisplayHealthTrendScore(
     assessment: Assessment,
   ): number {
     const patientReportedText =
@@ -422,18 +465,52 @@ function AppBody() {
         patientReportedText,
       );
 
-    return calculateHealthTrendScore(
-      {
-        urgency:
-          assessment.urgency,
+    const urgencyPenalty =
+      (() => {
+        switch (
+          assessment.urgency
+        ) {
+          case "self-care":
+            return 0;
 
-        redFlagCount:
-          assessment
-            .redFlags
-            .length,
+          case "see-a-doctor":
+            return 8;
 
-        worsening,
-      },
+          case "urgent":
+            return 20;
+
+          case "emergency":
+            return 50;
+
+          default:
+            return 0;
+        }
+      })();
+
+    const redFlagPenalty =
+      Math.min(
+        30,
+        assessment.redFlags.length *
+          10,
+      );
+
+    const worseningPenalty =
+      worsening
+        ? 8
+        : 0;
+
+    const score =
+      70 -
+      urgencyPenalty -
+      redFlagPenalty -
+      worseningPenalty;
+
+    return Math.max(
+      0,
+      Math.min(
+        100,
+        Math.round(score),
+      ),
     );
   }
 
@@ -481,25 +558,34 @@ function AppBody() {
         number
       >;
 
-    const healthTrendScore =
-      buildHealthTrendScore(
-        assessment,
-      );
-
+    /**
+     * Do NOT send a client-calculated Health Condition
+     * Trend as an authoritative value.
+     *
+     * saveCheck() calculates and validates the final
+     * persisted trend server-side.
+     */
     return {
       symptoms:
         symptoms.trim(),
 
       /**
        * Existing Symptom Match Strength.
+       *
+       * This remains the historical `severity`
+       * field for backward database compatibility.
        */
       severity:
         top.likelihood,
 
       /**
-       * Independent Health Condition Trend.
+       * Kept as null deliberately.
+       *
+       * The server must calculate the authoritative
+       * Health Condition Trend.
        */
-      healthTrendScore,
+      healthTrendScore:
+        null,
 
       urgency:
         assessment.urgency,
@@ -557,9 +643,10 @@ function AppBody() {
         "",
 
       /**
-       * Explicitly identify this route as Self History.
+       * This route is explicitly Self History.
        *
-       * This keeps the payload unambiguous.
+       * Patient history has a separate route and
+       * separate save payload.
        */
       subjectType:
         "self" as const,
@@ -585,6 +672,14 @@ function AppBody() {
     if (emergency) {
       setOverride(
         emergency,
+      );
+
+      setSavedId(
+        null,
+      );
+
+      setSavedHealthTrendScore(
+        null,
       );
 
       setStage(
@@ -634,6 +729,10 @@ function AppBody() {
           );
 
           setSavedId(
+            null,
+          );
+
+          setSavedHealthTrendScore(
             null,
           );
 
@@ -692,11 +791,14 @@ function AppBody() {
           );
 
           /**
-           * A fresh assessment is not saved
-           * until the user explicitly saves it,
-           * unless it is an emergency.
+           * A fresh assessment is not considered
+           * saved until saveCheck() returns a real ID.
            */
           setSavedId(
+            null,
+          );
+
+          setSavedHealthTrendScore(
             null,
           );
         },
@@ -767,8 +869,10 @@ function AppBody() {
           saved,
         ) => {
           /**
-           * saveCheck now has a strict response:
-           * { id: string }
+           * saveCheck() must return the actual database ID.
+           *
+           * It may additionally return the server-calculated
+           * Health Condition Trend.
            */
           const returnedId =
             typeof saved ===
@@ -784,21 +888,51 @@ function AppBody() {
           }
 
           /**
-           * Only a real database UUID
-           * marks the check as saved.
+           * Only a real database UUID marks
+           * the assessment as saved.
            */
           setSavedId(
             returnedId,
           );
 
           /**
-           * IMPORTANT:
+           * If the server returns the authoritative
+           * Health Condition Trend, use it.
            *
-           * Self History uses ["self-checks"].
+           * Otherwise keep null rather than inventing
+           * a persisted value on the client.
+           */
+          const serverTrend =
+            typeof saved ===
+              "object" &&
+            saved !== null &&
+            typeof saved.healthTrendScore ===
+              "number" &&
+            Number.isFinite(
+              saved.healthTrendScore,
+            )
+              ? Math.max(
+                  0,
+                  Math.min(
+                    100,
+                    Math.round(
+                      saved.healthTrendScore,
+                    ),
+                  ),
+                )
+              : null;
+
+          setSavedHealthTrendScore(
+            serverTrend,
+          );
+
+          /**
+           * Self History has its own query namespace.
            *
-           * Patient History uses a completely
-           * separate ["patient-checks", patientId]
-           * key elsewhere.
+           * Patient History uses:
+           * ["patient-checks", patientId]
+           *
+           * and therefore remains isolated.
            */
           queryClient.invalidateQueries(
             {
@@ -849,9 +983,8 @@ function AppBody() {
         ),
       );
     },
-    // The mutation object is intentionally not
-    // included as a dependency because React Query
-    // mutation objects are not stable references.
+    // Mutation objects are intentionally excluded because
+    // React Query mutation objects are not stable references.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       result,
@@ -939,6 +1072,10 @@ function AppBody() {
             0,
         );
 
+    /**
+     * Immediate emergency screening is performed
+     * against the actual patient answer set.
+     */
     const emergency =
       immediateEmergencyAssessment(
         {
@@ -952,6 +1089,14 @@ function AppBody() {
     if (emergency) {
       setOverride(
         emergency,
+      );
+
+      setSavedId(
+        null,
+      );
+
+      setSavedHealthTrendScore(
+        null,
       );
 
       setStage(
@@ -1056,6 +1201,10 @@ function AppBody() {
       null,
     );
 
+    setSavedHealthTrendScore(
+      null,
+    );
+
     setOverride(
       null,
     );
@@ -1087,12 +1236,23 @@ function AppBody() {
   /*                         Current trend score                               */
   /* ------------------------------------------------------------------------ */
 
+  /**
+   * Before saving:
+   *   display-only local indicator.
+   *
+   * After successful saving:
+   *   prefer server-confirmed value.
+   *
+   * This prevents a client-created value from being
+   * treated as the persisted source of truth.
+   */
   const currentHealthTrendScore =
-    result
-      ? buildHealthTrendScore(
+    savedHealthTrendScore ??
+    (result
+      ? buildDisplayHealthTrendScore(
           result,
         )
-      : null;
+      : null);
 
   /* ------------------------------------------------------------------------ */
   /*                                  UI                                      */
@@ -1884,10 +2044,16 @@ function AppBody() {
                       </div>
 
                       <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-                        {lang ===
-                        "bn"
-                          ? "পরবর্তী check-এ এই score বাড়লে graph উপরে উঠবে এবং কমলে graph নিচে নামবে। এটি validated clinical health score নয়।"
-                          : "In later checks, a higher score will move the trend graph upward and a lower score will move it downward. This is not a validated clinical health score."}
+                        {savedHealthTrendScore !==
+                        null
+                          ? lang ===
+                            "bn"
+                            ? "এই check-এর Health Condition Trend score server থেকে নিশ্চিত হয়েছে এবং history-তে সংরক্ষিত হয়েছে।"
+                            : "This check's Health Condition Trend score has been confirmed by the server and saved to history."
+                          : lang ===
+                            "bn"
+                            ? "এই score বর্তমানে এই check-এর reported information-এর ভিত্তিতে display করা হচ্ছে। Save করলে history-তে server-calculated score সংরক্ষিত হবে।"
+                            : "This score is currently displayed from the information reported in this check. When saved, the server-calculated score will be stored in history."}
                       </p>
                     </CardContent>
                   </Card>
