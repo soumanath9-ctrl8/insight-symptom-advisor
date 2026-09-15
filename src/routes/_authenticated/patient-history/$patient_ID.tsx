@@ -9,6 +9,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { useMemo } from "react";
+import type React from "react";
 import {
   Activity,
   ArrowLeft,
@@ -58,14 +59,29 @@ import { Separator } from "@/components/ui/separator";
  * Patient History:
  * /patient-history/$patient_ID
  *
- * IMPORTANT:
+ * IMPORTANT DATA-ISOLATION RULE
  *
- * This route NEVER uses listChecks().
+ * This route NEVER calls listChecks().
  *
- * It only uses listPatientChecks() for the selected patient.
+ * It only calls listPatientChecks() with the selected
+ * patient ID.
  *
- * Self history and patient history remain completely
- * data-isolated.
+ * The server is responsible for verifying that:
+ *
+ * 1. The logged-in user is authenticated.
+ * 2. The selected patient exists.
+ * 3. The selected patient belongs to the logged-in user.
+ * 4. Only checks belonging to that patient are returned.
+ *
+ * Therefore:
+ *
+ * SELF HISTORY
+ *     -> listChecks()
+ *
+ * PATIENT HISTORY
+ *     -> listPatientChecks(patientId)
+ *
+ * These two histories remain completely separated.
  */
 
 export const Route = createFileRoute(
@@ -74,6 +90,12 @@ export const Route = createFileRoute(
   ssr: false,
 
   beforeLoad: async ({ params }) => {
+    /*
+     * Dynamic route parameters are required.
+     *
+     * If the parameter is missing, do not attempt any
+     * patient query.
+     */
     if (!params.patient_ID) {
       throw redirect({
         to: "/patients",
@@ -105,6 +127,12 @@ function PatientHistoryPage() {
    * =======================================================
    * PATIENT PROFILE
    * =======================================================
+   *
+   * This query is scoped to the selected patient ID.
+   *
+   * getPatient() performs the owner verification on the
+   * server, so a user cannot use another user's patient ID
+   * to retrieve that patient's profile.
    */
 
   const patientQuery = useQuery({
@@ -112,6 +140,9 @@ function PatientHistoryPage() {
       "patient",
       patientId,
     ],
+
+    enabled:
+      Boolean(patientId),
 
     queryFn: () =>
       getPatient({
@@ -128,11 +159,18 @@ function PatientHistoryPage() {
    *
    * HARD DATA ISOLATION
    *
-   * Server-side listPatientChecks() is responsible for
-   * verifying that this patient belongs to the logged-in
-   * user.
+   * This query NEVER calls listChecks().
    *
-   * This page never requests self history.
+   * The selected patient ID is passed to the server.
+   *
+   * history.functions.ts then verifies:
+   *
+   * patient_profiles.id = patientId
+   * AND
+   * patient_profiles.owner_user_id = authenticated user
+   *
+   * Only after that verification are the patient's checks
+   * returned.
    */
 
   const historyQuery = useQuery({
@@ -140,6 +178,9 @@ function PatientHistoryPage() {
       "patient-checks",
       patientId,
     ],
+
+    enabled:
+      Boolean(patientId),
 
     queryFn: () =>
       listPatientChecks({
@@ -154,7 +195,22 @@ function PatientHistoryPage() {
    * DELETE PATIENT HISTORY
    * =======================================================
    *
-   * Only the patient-history query is invalidated.
+   * deleteCheck() performs owner-scoped authorization on
+   * the server.
+   *
+   * This page does NOT send:
+   *
+   * - user ID
+   * - owner ID
+   * - arbitrary patient ID
+   *
+   * to authorize deletion.
+   *
+   * The server determines ownership from the authenticated
+   * session.
+   *
+   * After deletion, ONLY this patient's history query is
+   * invalidated.
    *
    * Self history is never invalidated or modified here.
    */
@@ -168,8 +224,8 @@ function PatientHistoryPage() {
           },
         }),
 
-      onSuccess: () => {
-        queryClient.invalidateQueries({
+      onSuccess: async () => {
+        await queryClient.invalidateQueries({
           queryKey: [
             "patient-checks",
             patientId,
@@ -177,6 +233,12 @@ function PatientHistoryPage() {
         });
       },
     });
+
+  /*
+   * =======================================================
+   * RAW QUERY DATA
+   * =======================================================
+   */
 
   const patient =
     patientQuery.data;
@@ -188,6 +250,10 @@ function PatientHistoryPage() {
    * =======================================================
    * CHRONOLOGICAL HISTORY
    * =======================================================
+   *
+   * Oldest -> newest.
+   *
+   * This order is used for all graphs and calculations.
    */
 
   const sortedHistory =
@@ -204,10 +270,22 @@ function PatientHistoryPage() {
    * SYMPTOM MATCH STRENGTH DATA
    * =======================================================
    *
-   * `severity` is interpreted as Symptom Match Strength
-   * through historyMatchStrength().
+   * IMPORTANT:
    *
-   * This preserves existing history values.
+   * `severity` is legacy storage terminology.
+   *
+   * In the current application it represents:
+   *
+   * Symptom Match Strength
+   *
+   * It is NOT:
+   *
+   * - medical risk
+   * - disease probability
+   * - diagnosis probability
+   * - AI assessed risk
+   *
+   * historyMatchStrength() performs the normalization.
    */
 
   const matchStrengthHistory =
@@ -228,12 +306,26 @@ function PatientHistoryPage() {
    * HEALTH CONDITION TREND DATA
    * =======================================================
    *
-   * ONLY ACTUALLY STORED TREND SCORES ARE USED.
+   * IMPORTANT DATA-PRESERVATION RULE
    *
-   * Legacy records with null healthTrendScore remain null.
+   * Only actually stored healthTrendScore values are used.
    *
-   * We NEVER fall back to severity because severity is
-   * Symptom Match Strength.
+   * Legacy records with:
+   *
+   * healthTrendScore = null
+   *
+   * remain null.
+   *
+   * We NEVER calculate a new Health Condition Trend score
+   * from:
+   *
+   * - severity
+   * - Symptom Match Strength
+   * - date
+   * - top condition
+   * - urgency
+   *
+   * This prevents historical data from being fabricated.
    */
 
   const healthTrendHistory =
@@ -318,7 +410,7 @@ function PatientHistoryPage() {
 
   /*
    * =======================================================
-   * HEALTH CONDITION TREND SUMMARY
+   * LATEST HEALTH CONDITION TREND
    * =======================================================
    */
 
@@ -329,12 +421,24 @@ function PatientHistoryPage() {
         ]?.value ?? null
       : null;
 
+  /*
+   * =======================================================
+   * PREVIOUS HEALTH CONDITION TREND
+   * =======================================================
+   */
+
   const previousHealthTrend =
     healthTrendHistory.length > 1
       ? healthTrendHistory[
           healthTrendHistory.length - 2
         ]?.value ?? null
       : null;
+
+  /*
+   * =======================================================
+   * HEALTH CONDITION TREND DIRECTION
+   * =======================================================
+   */
 
   const healthTrendDirection =
     latestHealthTrend === null ||
@@ -348,6 +452,12 @@ function PatientHistoryPage() {
           ? "down"
           : "stable";
 
+  /*
+   * =======================================================
+   * AVERAGE HEALTH CONDITION TREND
+   * =======================================================
+   */
+
   const averageHealthTrend =
     healthTrendHistory.length > 0
       ? healthTrendHistory.reduce(
@@ -360,7 +470,7 @@ function PatientHistoryPage() {
 
   /*
    * =======================================================
-   * LOADING PATIENT
+   * PATIENT PROFILE LOADING
    * =======================================================
    */
 
@@ -385,8 +495,17 @@ function PatientHistoryPage() {
 
   /*
    * =======================================================
-   * PATIENT NOT FOUND / ACCESS ERROR
+   * PATIENT PROFILE ACCESS ERROR
    * =======================================================
+   *
+   * We intentionally do not distinguish between:
+   *
+   * - patient does not exist
+   * - patient belongs to another account
+   * - patient cannot be accessed
+   *
+   * This avoids unnecessarily exposing whether another
+   * account's patient ID exists.
    */
 
   if (
@@ -437,11 +556,40 @@ function PatientHistoryPage() {
 
   /*
    * =======================================================
+   * PATIENT HISTORY LOADING
+   * =======================================================
+   */
+
+  if (
+    historyQuery.isLoading
+  ) {
+    return (
+      <main className="min-h-screen bg-background">
+        <ProfileMenu />
+
+        <div className="mx-auto flex min-h-[70vh] max-w-4xl items-center justify-center px-5">
+          <div
+            className="flex items-center gap-3 text-sm text-muted-foreground"
+            aria-live="polite"
+          >
+            <Loader2 className="size-5 animate-spin" />
+
+            Loading patient history…
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  /*
+   * =======================================================
    * HISTORY ERROR
    * =======================================================
    */
 
-  if (historyQuery.isError) {
+  if (
+    historyQuery.isError
+  ) {
     return (
       <main className="min-h-screen bg-background">
         <ProfileMenu />
@@ -455,7 +603,8 @@ function PatientHistoryPage() {
             <Link
               to="/patient-checker/$patient_ID"
               params={{
-                patient_ID: patientId,
+                patient_ID:
+                  patientId,
               }}
             >
               <ArrowLeft className="mr-2 size-4" />
@@ -519,7 +668,8 @@ function PatientHistoryPage() {
           <Link
             to="/patient-checker/$patient_ID"
             params={{
-              patient_ID: patientId,
+              patient_ID:
+                patientId,
             }}
           >
             <ArrowLeft className="mr-2 size-4" />
@@ -547,7 +697,10 @@ function PatientHistoryPage() {
             </h1>
 
             <p className="mt-1 text-sm text-muted-foreground">
-              {[patient.age, patient.sex]
+              {[
+                patient.age,
+                patient.sex,
+              ]
                 .filter(Boolean)
                 .join(" · ")}
             </p>
@@ -596,7 +749,8 @@ function PatientHistoryPage() {
                 <Link
                   to="/patient-checker/$patient_ID"
                   params={{
-                    patient_ID: patientId,
+                    patient_ID:
+                      patientId,
                   }}
                 >
                   Start Patient Symptom Check
@@ -898,24 +1052,36 @@ function PatientHistoryPage() {
                 </p>
               </div>
 
-              {/* IMPORTANT:
+              {/*
+               * IMPORTANT
                *
-               * SymptomTimeline is intentionally used as
-               * a SAVED-CHECK LIST ONLY.
+               * SymptomTimeline is intentionally a
+               * SAVED-CHECK LIST ONLY.
                *
-               * It must not render a graph here.
+               * It must NOT render:
                *
-               * Therefore this page contains exactly:
+               * - Symptom Match Strength graph
+               * - Health Condition Trend graph
+               * - AI Risk graph
                *
-               * 1 Health Condition Trend graph
-               * 1 Symptom Match Strength graph
-               * 0 AI Risk graphs
+               * The two graphs above are the only graphs
+               * on this patient history page:
+               *
+               * 1. Health Condition Trend
+               * 2. Symptom Match Strength
+               *
+               * This prevents the duplicate graph that was
+               * previously appearing under Saved checks.
                */}
 
               <SymptomTimeline
-                entries={history}
+                entries={
+                  sortedHistory
+                }
                 onRemove={(id) =>
-                  removeMutation.mutate(id)
+                  removeMutation.mutate(
+                    id,
+                  )
                 }
               />
 
@@ -956,7 +1122,8 @@ function PatientHistoryPage() {
             <Link
               to="/patient-checker/$patient_ID"
               params={{
-                patient_ID: patientId,
+                patient_ID:
+                  patientId,
               }}
             >
               Check {patient.name}'s Symptoms
@@ -1045,10 +1212,9 @@ function TrendSummary({
  * HEALTH CONDITION TREND GRAPH
  * =========================================================
  *
- * ONLY entries with an actually stored
- * healthTrendScore are rendered.
+ * Only actual stored healthTrendScore values are rendered.
  *
- * Legacy null values are excluded.
+ * Legacy null values are intentionally excluded.
  */
 
 function HealthTrendGraph({
@@ -1339,8 +1505,10 @@ function HealthTrendGraph({
  * SYMPTOM MATCH STRENGTH GRAPH
  * =========================================================
  *
- * `severity` is interpreted ONLY as
- * Symptom Match Strength.
+ * `severity` is interpreted ONLY through
+ * historyMatchStrength().
+ *
+ * It is never treated as Health Condition Trend.
  */
 
 function MatchStrengthGraph({
