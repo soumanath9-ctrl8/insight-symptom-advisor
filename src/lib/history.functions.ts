@@ -21,10 +21,9 @@ const UrgencySchema = z.enum([
 ]);
 
 /**
- * Existing metric:
+ * Symptom Match Strength
  *
- * Symptom Match Strength = 0–100
- *
+ * 0–100 relative symptom-match score.
  * This is NOT diagnostic probability or clinical risk.
  */
 const MatchStrengthSchema = z
@@ -33,15 +32,14 @@ const MatchStrengthSchema = z
   .max(100);
 
 /**
- * New independent metric:
+ * Health Condition Trend
  *
- * Health Condition Trend = 0–100
+ * 0–100 independent non-clinical trend indicator.
  *
- * Higher = better reported health trend.
- * Lower = worse reported health trend.
+ * Higher = better reported condition.
+ * Lower = worse reported condition.
  *
- * NULL is allowed for legacy records that were created
- * before this metric existed.
+ * null = legacy record with no trend value.
  */
 const HealthTrendScoreSchema = z
   .number()
@@ -55,134 +53,156 @@ const AnswerSchema = z.object({
   answer: z.string(),
 });
 
-/**
- * IMPORTANT:
- *
- * AnswerSchema is a Zod runtime schema.
- * HistoryCheck must use the inferred TypeScript type instead
- * of using AnswerSchema directly as a type.
- */
-type HistoryAnswer =
-  z.infer<typeof AnswerSchema>;
+type HistoryAnswer = z.infer<
+  typeof AnswerSchema
+>;
 
 /* -------------------------------------------------------------------------- */
 /*                             Save Check Schema                              */
 /* -------------------------------------------------------------------------- */
 
-const SaveCheckSchema = z.object({
-  symptoms:
-    z.string()
+const SaveCheckSchema = z
+  .object({
+    symptoms: z
+      .string()
       .min(1)
       .max(2000),
 
-  duration:
-    z.string()
+    duration: z
+      .string()
       .max(100)
       .optional()
       .default(""),
 
-  /*
-   * IMPORTANT:
-   *
-   * severity is retained for backwards compatibility
-   * and represents Symptom Match Strength (0–100).
-   *
-   * It is NOT a diagnostic probability.
-   */
-  severity:
-    MatchStrengthSchema
+    /**
+     * Existing database field.
+     *
+     * This is Symptom Match Strength.
+     * It is NOT diagnostic probability.
+     */
+    severity: MatchStrengthSchema
       .optional()
       .default(0),
 
-  /*
-   * NEW:
-   *
-   * Independent 0–100 non-clinical health trend score.
-   *
-   * Higher = better reported health trend.
-   * Lower = worse reported health trend.
-   *
-   * It must NEVER be calculated from condition likelihood.
-   */
-  healthTrendScore:
-    HealthTrendScoreSchema,
+    /**
+     * Independent Health Condition Trend.
+     *
+     * null is deliberately accepted for legacy/no-trend records.
+     */
+    healthTrendScore:
+      HealthTrendScoreSchema,
 
-  urgency:
-    UrgencySchema
+    urgency: UrgencySchema
       .default("self-care"),
 
-  topCondition:
-    z.string()
+    topCondition: z
+      .string()
       .max(300)
       .optional()
       .default(""),
 
-  summary:
-    z.string()
+    summary: z
+      .string()
       .max(4000)
       .optional()
       .default(""),
 
-  answers:
-    z.array(AnswerSchema)
+    answers: z
+      .array(AnswerSchema)
       .max(6)
       .optional()
       .default([]),
 
-  redFlag:
-    z.boolean()
+    redFlag: z
+      .boolean()
       .optional()
       .default(false),
 
-  redFlags:
-    z.array(z.string())
+    redFlags: z
+      .array(z.string())
       .max(30)
       .optional()
       .default([]),
 
-  categories:
-    z.array(z.string())
+    categories: z
+      .array(z.string())
       .max(30)
       .optional()
       .default([]),
 
-  supportingFactors:
-    z.array(z.string())
+    supportingFactors: z
+      .array(z.string())
       .max(30)
       .optional()
       .default([]),
 
-  uncertainty:
-    z.string()
+    uncertainty: z
+      .string()
       .max(4000)
       .optional()
       .default(""),
 
-  nextStep:
-    z.string()
+    nextStep: z
+      .string()
       .max(4000)
       .optional()
       .default(""),
 
-  vitals:
-    z.record(
-      z.string(),
-      z.any(),
-    )
+    /**
+     * JSON-compatible vitals object.
+     *
+     * The checker currently sends a plain object.
+     */
+    vitals: z
+      .record(
+        z.string(),
+        z.any(),
+      )
       .optional()
       .nullable(),
 
-  subjectType:
-    SubjectTypeSchema
+    subjectType: SubjectTypeSchema
       .optional()
       .default("self"),
 
-  patientId:
-    z.string()
+    patientId: z
+      .string()
       .uuid()
       .optional()
       .nullable(),
-});
+  })
+  .superRefine(
+    (value, ctx) => {
+      if (
+        value.subjectType ===
+          "self" &&
+        value.patientId !==
+          null &&
+        value.patientId !==
+          undefined
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["patientId"],
+          message:
+            "Self checks cannot contain a patient ID.",
+        });
+      }
+
+      if (
+        value.subjectType ===
+          "patient" &&
+        !value.patientId
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["patientId"],
+          message:
+            "A patient ID is required for a patient check.",
+        });
+      }
+    },
+  );
 
 const PatientIdSchema = z.object({
   patientId:
@@ -214,29 +234,23 @@ export type HistoryCheck = {
 
   duration?: string;
 
-  /*
-   * Existing metric:
-   *
+  /**
    * Symptom Match Strength.
    *
    * 0–100.
    */
   severity: number;
 
-  /*
-   * New metric:
-   *
+  /**
    * Health Condition Trend.
    *
    * 0–100.
    *
-   * Higher = better reported health trend.
-   * Lower = worse reported health trend.
-   *
-   * NULL = legacy record with no trend value.
+   * null = legacy record without trend data.
    */
   healthTrendScore:
-    number | null;
+    | number
+    | null;
 
   urgency: Urgency;
 
@@ -244,12 +258,6 @@ export type HistoryCheck = {
 
   summary: string;
 
-  /*
-   * IMPORTANT:
-   *
-   * Use the inferred TypeScript type,
-   * not AnswerSchema directly.
-   */
   answers: HistoryAnswer[];
 
   redFlag: boolean;
@@ -264,8 +272,7 @@ export type HistoryCheck = {
 
   nextStep: string;
 
-  vitals:
-    Json | null;
+  vitals: Json | null;
 
   subjectType:
     HistorySubjectType;
@@ -276,24 +283,15 @@ export type HistoryCheck = {
 
 type SupabaseClient =
   Awaited<
-    ReturnType<typeof requireSupabaseAuth>
+    ReturnType<
+      typeof requireSupabaseAuth
+    >
   >["supabase"];
-
-type AuthUser =
-  Awaited<
-    ReturnType<typeof requireSupabaseAuth>
-  >["user"];
 
 /* -------------------------------------------------------------------------- */
 /*                              Helper Functions                              */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Clamp any numeric 0–100 score.
- *
- * This protects the application layer from malformed
- * or unexpected persisted values.
- */
 function clampScore(
   value: unknown,
 ): number {
@@ -315,134 +313,6 @@ function clampScore(
   );
 }
 
-/**
- * Convert database row into the application
- * HistoryCheck shape.
- *
- * IMPORTANT:
- *
- * severity and health_trend_score are deliberately
- * mapped independently.
- *
- * severity
- *   = Symptom Match Strength
- *
- * health_trend_score
- *   = Health Condition Trend
- */
-function mapHistoryRow(
-  row: any,
-): HistoryCheck {
-  return {
-    id:
-      row.id,
-
-    createdAt:
-      row.created_at,
-
-    date:
-      row.created_at,
-
-    symptoms:
-      row.symptoms ?? "",
-
-    duration:
-      row.duration ?? "",
-
-    /*
-     * Existing metric:
-     *
-     * Symptom Match Strength.
-     */
-    severity:
-      clampScore(
-        row.severity,
-      ),
-
-    /*
-     * New independent metric:
-     *
-     * Health Condition Trend.
-     *
-     * NULL means this is a legacy record for which
-     * no Health Trend was calculated.
-     *
-     * IMPORTANT:
-     * We do NOT fall back to severity here.
-     */
-    healthTrendScore:
-      row.health_trend_score === null ||
-      row.health_trend_score === undefined
-        ? null
-        : clampScore(
-            row.health_trend_score,
-          ),
-
-    urgency:
-      normalizeUrgency(
-        row.urgency,
-      ),
-
-    topCondition:
-      row.top_condition ?? "",
-
-    summary:
-      row.summary ?? "",
-
-    answers:
-      Array.isArray(row.answers)
-        ? row.answers
-        : [],
-
-    redFlag:
-      Boolean(
-        row.red_flag,
-      ),
-
-    redFlags:
-      Array.isArray(
-        row.red_flags,
-      )
-        ? row.red_flags
-        : [],
-
-    categories:
-      Array.isArray(
-        row.categories,
-      )
-        ? row.categories
-        : [],
-
-    supportingFactors:
-      Array.isArray(
-        row.supporting_factors,
-      )
-        ? row.supporting_factors
-        : [],
-
-    uncertainty:
-      row.uncertainty ?? "",
-
-    nextStep:
-      row.next_step ?? "",
-
-    vitals:
-      row.vitals ?? null,
-
-    subjectType:
-      row.subject_type === "patient"
-        ? "patient"
-        : "self",
-
-    patientId:
-      row.patient_id ?? null,
-  };
-}
-
-/**
- * Keep urgency values safe when reading
- * persisted database data.
- */
 function normalizeUrgency(
   value: unknown,
 ): Urgency {
@@ -464,11 +334,213 @@ function normalizeUrgency(
   }
 }
 
+function normalizeAnswers(
+  value: unknown,
+): HistoryAnswer[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter(
+      (
+        item,
+      ): item is {
+        question: string;
+        answer: string;
+      } =>
+        Boolean(
+          item &&
+            typeof item ===
+              "object" &&
+            typeof item.question ===
+              "string" &&
+            typeof item.answer ===
+              "string",
+        ),
+    )
+    .slice(0, 6)
+    .map(
+      (item) => ({
+        question:
+          item.question,
+        answer:
+          item.answer,
+      }),
+    );
+}
+
+function normalizeStringArray(
+  value: unknown,
+  max = 30,
+): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter(
+      (
+        item,
+      ): item is string =>
+        typeof item ===
+        "string",
+    )
+    .map(
+      (item) =>
+        item.trim(),
+    )
+    .filter(Boolean)
+    .slice(0, max);
+}
+
+function normalizeVitals(
+  value: unknown,
+): Json | null {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return null;
+  }
+
+  if (
+    typeof value !== "object" ||
+    Array.isArray(value)
+  ) {
+    return null;
+  }
+
+  try {
+    const serialized =
+      JSON.stringify(value);
+
+    if (
+      serialized ===
+      undefined
+    ) {
+      return null;
+    }
+
+    return JSON.parse(
+      serialized,
+    ) as Json;
+  } catch {
+    return null;
+  }
+}
+
+function mapHistoryRow(
+  row: any,
+): HistoryCheck {
+  const createdAt =
+    row.created_at
+      ? new Date(
+          row.created_at,
+        ).toISOString()
+      : new Date().toISOString();
+
+  return {
+    id:
+      row.id,
+
+    createdAt,
+
+    date:
+      createdAt,
+
+    symptoms:
+      row.symptoms ?? "",
+
+    duration:
+      row.duration ?? "",
+
+    /**
+     * Existing metric remains completely
+     * independent from Health Condition Trend.
+     */
+    severity:
+      clampScore(
+        row.severity,
+      ),
+
+    /**
+     * IMPORTANT:
+     *
+     * Do not use severity as fallback.
+     * Legacy records remain null.
+     */
+    healthTrendScore:
+      row.health_trend_score ===
+        null ||
+      row.health_trend_score ===
+        undefined
+        ? null
+        : clampScore(
+            row.health_trend_score,
+          ),
+
+    urgency:
+      normalizeUrgency(
+        row.urgency,
+      ),
+
+    topCondition:
+      row.top_condition ??
+      "",
+
+    summary:
+      row.summary ?? "",
+
+    answers:
+      normalizeAnswers(
+        row.answers,
+      ),
+
+    redFlag:
+      Boolean(
+        row.red_flag,
+      ),
+
+    redFlags:
+      normalizeStringArray(
+        row.red_flags,
+      ),
+
+    categories:
+      normalizeStringArray(
+        row.categories,
+      ),
+
+    supportingFactors:
+      normalizeStringArray(
+        row.supporting_factors,
+      ),
+
+    uncertainty:
+      row.uncertainty ?? "",
+
+    nextStep:
+      row.next_step ?? "",
+
+    vitals:
+      normalizeVitals(
+        row.vitals,
+      ),
+
+    subjectType:
+      row.subject_type ===
+      "patient"
+        ? "patient"
+        : "self",
+
+    patientId:
+      row.patient_id ?? null,
+  };
+}
+
 /**
  * Server-side patient ownership verification.
- *
- * A patient record must always belong to the
- * currently authenticated user.
  */
 async function verifyOwnedPatient(
   supabase: SupabaseClient,
@@ -479,7 +551,9 @@ async function verifyOwnedPatient(
     data,
     error,
   } = await supabase
-    .from("patient_profiles")
+    .from(
+      "patient_profiles",
+    )
     .select("id")
     .eq(
       "id",
@@ -493,7 +567,7 @@ async function verifyOwnedPatient(
 
   if (error) {
     throw new Error(
-      "Unable to verify patient ownership.",
+      `Unable to verify patient ownership: ${error.message}`,
     );
   }
 
@@ -510,19 +584,6 @@ async function verifyOwnedPatient(
 /*                              Self History                                  */
 /* -------------------------------------------------------------------------- */
 
-/**
- * SELF HISTORY
- *
- * Returns ONLY records belonging to the
- * authenticated user's own self-check history.
- *
- * Patient records can NEVER appear here.
- *
- * Required separation:
- *
- * subject_type = "self"
- * patient_id   IS NULL
- */
 export const listChecks =
   createServerFn({
     method: "GET",
@@ -537,7 +598,9 @@ export const listChecks =
       data,
       error,
     } = await supabase
-      .from("symptom_checks")
+      .from(
+        "symptom_checks",
+      )
       .select("*")
       .eq(
         "user_id",
@@ -575,19 +638,6 @@ export const listChecks =
 /*                             Patient History                                */
 /* -------------------------------------------------------------------------- */
 
-/**
- * PATIENT HISTORY
- *
- * Returns ONLY records belonging to the
- * requested patient.
- *
- * Ownership is verified before querying history.
- *
- * Required separation:
- *
- * subject_type = "patient"
- * patient_id   = requested owned patient
- */
 export const listPatientChecks =
   createServerFn({
     method: "GET",
@@ -605,20 +655,19 @@ export const listPatientChecks =
         } =
           await requireSupabaseAuth();
 
-        const patientId =
-          data.patientId;
-
         await verifyOwnedPatient(
           supabase,
           user.id,
-          patientId,
+          data.patientId,
         );
 
         const {
           data: rows,
           error,
         } = await supabase
-          .from("symptom_checks")
+          .from(
+            "symptom_checks",
+          )
           .select("*")
           .eq(
             "user_id",
@@ -630,7 +679,7 @@ export const listPatientChecks =
           )
           .eq(
             "patient_id",
-            patientId,
+            data.patientId,
           )
           .order(
             "created_at",
@@ -657,19 +706,6 @@ export const listPatientChecks =
 /*                                Save Check                                  */
 /* -------------------------------------------------------------------------- */
 
-/**
- * SAVE CHECK
- *
- * Self:
- *   subject_type = self
- *   patient_id   = null
- *
- * Patient:
- *   subject_type = patient
- *   patient_id   = verified owned patient
- *
- * The subject can never be switched by this function.
- */
 export const saveCheck =
   createServerFn({
     method: "POST",
@@ -687,24 +723,28 @@ export const saveCheck =
         } =
           await requireSupabaseAuth();
 
+        /**
+         * The validator has already executed,
+         * but parse again so this function remains
+         * safe if its implementation is called
+         * through another generated client boundary.
+         */
         const parsed =
           SaveCheckSchema.parse(
             data,
           );
 
         const subjectType =
-          parsed.subjectType ??
-          "self";
+          parsed.subjectType;
 
         let patientId:
           | string
           | null = null;
 
-        /*
-         * ------------------------------------------------------------------ *
-         * Patient check
-         * ------------------------------------------------------------------ *
-         */
+        /* ------------------------------------------------------------------ */
+        /* Patient check                                                       */
+        /* ------------------------------------------------------------------ */
+
         if (
           subjectType ===
           "patient"
@@ -717,14 +757,6 @@ export const saveCheck =
             );
           }
 
-          /*
-           * IMPORTANT:
-           *
-           * Never trust the patient ID merely because
-           * it came from the client.
-           *
-           * Verify ownership on the server.
-           */
           await verifyOwnedPatient(
             supabase,
             user.id,
@@ -735,20 +767,44 @@ export const saveCheck =
             parsed.patientId;
         }
 
-        /*
-         * ------------------------------------------------------------------ *
-         * Self check
-         * ------------------------------------------------------------------ *
-         *
-         * Self records are ALWAYS detached from
-         * patient_profiles.
-         */
+        /* ------------------------------------------------------------------ */
+        /* Self check                                                          */
+        /* ------------------------------------------------------------------ */
+
         if (
           subjectType ===
           "self"
         ) {
+          /**
+           * Self records are ALWAYS detached
+           * from patient_profiles.
+           */
           patientId = null;
         }
+
+        const answers =
+          (parsed.answers ??
+            [])
+            .slice(0, 6)
+            .map(
+              (item) => ({
+                question:
+                  item.question
+                    .trim()
+                    .slice(
+                      0,
+                      2000,
+                    ),
+
+                answer:
+                  item.answer
+                    .trim()
+                    .slice(
+                      0,
+                      2000,
+                    ),
+              }),
+            );
 
         const insertPayload = {
           user_id:
@@ -762,9 +818,8 @@ export const saveCheck =
             parsed.duration
               ?.trim() ?? "",
 
-          /*
+          /**
            * Existing metric:
-           *
            * Symptom Match Strength.
            */
           severity:
@@ -772,20 +827,10 @@ export const saveCheck =
               parsed.severity,
             ),
 
-          /*
-           * NEW independent metric:
+          /**
+           * Independent Health Condition Trend.
            *
-           * Health Condition Trend.
-           *
-           * IMPORTANT:
-           *
-           * This value comes from the checker-side
-           * health trend calculation.
-           *
-           * It is NOT derived from condition likelihood.
-           *
-           * NULL is preserved when no trend score was
-           * calculated.
+           * NULL remains NULL.
            */
           health_trend_score:
             parsed.healthTrendScore ===
@@ -808,8 +853,7 @@ export const saveCheck =
             parsed.summary
               ?.trim() ?? "",
 
-          answers:
-            parsed.answers ?? [],
+          answers,
 
           red_flag:
             Boolean(
@@ -817,14 +861,19 @@ export const saveCheck =
             ),
 
           red_flags:
-            parsed.redFlags ?? [],
+            normalizeStringArray(
+              parsed.redFlags,
+            ),
 
           categories:
-            parsed.categories ?? [],
+            normalizeStringArray(
+              parsed.categories,
+            ),
 
           supporting_factors:
-            parsed.supportingFactors ??
-            [],
+            normalizeStringArray(
+              parsed.supportingFactors,
+            ),
 
           uncertainty:
             parsed.uncertainty
@@ -835,8 +884,9 @@ export const saveCheck =
               ?.trim() ?? "",
 
           vitals:
-            parsed.vitals ??
-            null,
+            normalizeVitals(
+              parsed.vitals,
+            ),
 
           subject_type:
             subjectType,
@@ -849,11 +899,15 @@ export const saveCheck =
           data: inserted,
           error,
         } = await supabase
-          .from("symptom_checks")
+          .from(
+            "symptom_checks",
+          )
           .insert(
             insertPayload,
           )
-          .select("id")
+          .select(
+            "id",
+          )
           .single();
 
         if (error) {
@@ -862,13 +916,17 @@ export const saveCheck =
           );
         }
 
-        /*
-         * IMPORTANT:
-         *
-         * Return the ACTUAL database ID.
-         *
-         * Client code must not assume that a check
-         * was saved before this succeeds.
+        if (
+          !inserted?.id
+        ) {
+          throw new Error(
+            "The symptom check was not saved because no database ID was returned.",
+          );
+        }
+
+        /**
+         * Only after the database confirms the insert
+         * do we return success.
          */
         return {
           id:
@@ -881,15 +939,6 @@ export const saveCheck =
 /*                              Delete Check                                  */
 /* -------------------------------------------------------------------------- */
 
-/**
- * DELETE SELF OR PATIENT CHECK
- *
- * The check must belong to the authenticated
- * user.
- *
- * Patient records additionally require ownership
- * of the referenced patient.
- */
 export const deleteCheck =
   createServerFn({
     method: "POST",
@@ -915,7 +964,9 @@ export const deleteCheck =
           error:
             lookupError,
         } = await supabase
-          .from("symptom_checks")
+          .from(
+            "symptom_checks",
+          )
           .select(
             "id,user_id,subject_type,patient_id",
           )
@@ -941,10 +992,6 @@ export const deleteCheck =
           );
         }
 
-        /*
-         * Additional server-side patient ownership
-         * verification.
-         */
         if (
           existing.subject_type ===
             "patient" &&
@@ -961,7 +1008,9 @@ export const deleteCheck =
           error:
             deleteError,
         } = await supabase
-          .from("symptom_checks")
+          .from(
+            "symptom_checks",
+          )
           .delete()
           .eq(
             "id",
@@ -990,12 +1039,6 @@ export const deleteCheck =
 /*                              User Profile                                  */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Get the authenticated user's basic profile.
- *
- * This is intentionally separate from patient
- * profiles.
- */
 export const getProfile =
   createServerFn({
     method: "GET",
@@ -1049,14 +1092,6 @@ export const getProfile =
 /*                         Patient History Count                              */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Count checks belonging to one patient.
- *
- * Ownership is verified first.
- *
- * Only patient records for the requested patient
- * are counted.
- */
 export const getPatientHistoryCount =
   createServerFn({
     method: "GET",
@@ -1084,7 +1119,9 @@ export const getPatientHistoryCount =
           count,
           error,
         } = await supabase
-          .from("symptom_checks")
+          .from(
+            "symptom_checks",
+          )
           .select(
             "id",
             {
