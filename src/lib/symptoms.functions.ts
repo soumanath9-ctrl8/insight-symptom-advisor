@@ -64,15 +64,6 @@ const AssessmentInput = ContextInput.extend({
 /*                         Patient-specific input                              */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Patient checker has a completely separate input contract.
- *
- * Browser sends patientId.
- * Server verifies ownership and loads the actual profile.
- *
- * IMPORTANT:
- * Patient profile is intentionally NOT accepted from the browser.
- */
 const PatientAssessmentInput = z.object({
   patientId: z.string().uuid(),
 
@@ -197,9 +188,7 @@ export type Urgency =
   | "emergency";
 
 export type FollowUpQuestion =
-  z.infer<
-    typeof QuestionsSchema
-  >["questions"][number] & {
+  z.infer<typeof QuestionsSchema>["questions"][number] & {
     id: string;
   };
 
@@ -226,10 +215,11 @@ export type Assessment =
   };
 
 /**
- * FINAL SERVER ASSESSMENT RESULT
+ * Final assessment returned by the server.
  *
- * healthTrendScore is produced by this server-side
- * assessment pipeline. It is not supplied by the AI.
+ * healthTrendScore is calculated SERVER-SIDE.
+ *
+ * It is independent from condition.likelihood.
  */
 export type AssessmentResult = Assessment & {
   healthTrendScore: number;
@@ -294,11 +284,7 @@ function normalizeUrgency(
   const v = value.toLowerCase();
 
   /*
-   * IMPORTANT:
    * Emergency must be checked BEFORE urgent.
-   *
-   * "জরুরি অবস্থা" contains "জরুরি",
-   * so emergency must win.
    */
   if (
     v.includes("emerg") ||
@@ -371,7 +357,7 @@ type SafetyInput = {
  * Build text strictly from information actually reported
  * by the patient/user.
  *
- * QUESTION TEXT IS NEVER INCLUDED.
+ * Question text is NEVER included.
  */
 function patientReportedText(
   input: SafetyInput,
@@ -397,21 +383,6 @@ function patientReportedText(
 /*                          Deterministic safety screen                        */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Deterministic safety layer.
- *
- * This layer is authoritative for immediate
- * red-flag triage.
- *
- * Safety evidence comes only from:
- *
- * - initial symptom description
- * - duration
- * - patient answers
- * - patient-reported vitals contained in that text
- *
- * Question wording is NEVER used as evidence.
- */
 export function safetyScreen(
   input: SafetyInput,
 ): RedFlagResult & {
@@ -423,19 +394,7 @@ export function safetyScreen(
       : "en";
 
   /*
-   * IMPORTANT:
-   *
-   * red-flags.ts may accept question fields for
-   * compatibility, but we deliberately blank them.
-   *
-   * Therefore the detector cannot accidentally
-   * interpret:
-   *
-   * "Do you have chest pain?"
-   *
-   * as:
-   *
-   * "The patient has chest pain."
+   * Blank question text deliberately.
    */
   const reportedAnswers =
     (input.answers ?? []).map(
@@ -453,23 +412,20 @@ export function safetyScreen(
       answers:
         reportedAnswers,
 
-      ...(input.age !==
-      undefined
+      ...(input.age !== undefined
         ? {
             age: input.age,
           }
         : {}),
 
-      ...(input.duration !==
-      undefined
+      ...(input.duration !== undefined
         ? {
             duration:
               input.duration,
           }
         : {}),
 
-      ...(input.language !==
-      undefined
+      ...(input.language !== undefined
         ? {
             language:
               input.language,
@@ -478,11 +434,7 @@ export function safetyScreen(
     });
 
   /*
-   * VITALS MUST COME ONLY FROM PATIENT-REPORTED TEXT.
-   *
-   * No question text.
-   * No AI-generated content.
-   * No profile background.
+   * Vitals come ONLY from patient-reported content.
    */
   const reportedText =
     patientReportedText(input);
@@ -510,13 +462,6 @@ export function safetyScreen(
     ...vitalHits,
   ];
 
-  /*
-   * Critical always wins over urgent.
-   *
-   * critical -> immediate emergency
-   * urgent   -> prompt medical assessment
-   * none     -> no deterministic escalation
-   */
   const level =
     hits.some(
       (hit) =>
@@ -712,8 +657,7 @@ function contextBlock(
       ? `Duration: ${data.duration}`
       : "",
 
-    data.severity !==
-    undefined
+    data.severity !== undefined
       ? `Self-rated overall severity: ${data.severity}/10`
       : "",
   ]
@@ -976,10 +920,15 @@ export const getFollowUpQuestions =
 
         return QuestionsSchema.parse(
           raw,
-        ).questions.map((question, index) => ({
-          ...question,
-          id: `question-${index + 1}`,
-        }));
+        ).questions.map(
+          (
+            question,
+            index,
+          ) => ({
+            ...question,
+            id: `question-${index + 1}`,
+          }),
+        );
       },
     );
 
@@ -1095,10 +1044,15 @@ export const getPatientFollowUpQuestions =
 
         return QuestionsSchema.parse(
           raw,
-        ).questions.map((question, index) => ({
-          ...question,
-          id: `question-${index + 1}`,
-        }));
+        ).questions.map(
+          (
+            question,
+            index,
+          ) => ({
+            ...question,
+            id: `question-${index + 1}`,
+          }),
+        );
       },
     );
 
@@ -1114,11 +1068,6 @@ const WORSENING = [
   /খারাপ হচ্ছে|আরও খারাপ|উন্নতি হচ্ছে না|অবনতি হচ্ছে|অবস্থা খারাপ/,
 ];
 
-/**
- * Detect worsening ONLY from patient-reported content.
- *
- * Question text is deliberately ignored.
- */
 function isWorsening(
   symptoms: string,
 
@@ -1168,7 +1117,6 @@ function assessmentSystemPrompt(
   const {
     language,
     age,
-    sex,
     pregnancy,
     redFlagCheck,
     worseningOverride,
@@ -1573,9 +1521,6 @@ function normalizeAssessment(
       parsed.urgency,
     );
 
-  /*
-   * language remains part of the API boundary.
-   */
   if (language === "bn") {
     // Intentionally no-op.
   }
@@ -1639,11 +1584,6 @@ function normalizeAssessment(
 /*                     Deterministic urgency helpers                           */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Numeric urgency rank.
- *
- * emergency > urgent > see-a-doctor > self-care
- */
 function urgencyRank(
   urgency: Urgency,
 ): number {
@@ -1676,10 +1616,6 @@ function maxUrgency(
     : b;
 }
 
-/**
- * Convert deterministic safety level to
- * minimum allowed urgency.
- */
 function safetyMinimumUrgency(
   level:
     | "critical"
@@ -1707,15 +1643,6 @@ function safetyMinimumUrgency(
 /*                   Apply deterministic safety result                         */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Final safety gate.
- *
- * Rules:
- *
- * critical -> emergency
- * urgent   -> at least urgent
- * none     -> preserve AI result
- */
 function applySafetyOverride(
   assessment: Assessment,
 
@@ -1730,11 +1657,6 @@ function applySafetyOverride(
       safety.level,
     );
 
-  /*
-   * CRITICAL:
-   *
-   * Absolute emergency override.
-   */
   if (
     safety.level ===
     "critical"
@@ -1787,17 +1709,6 @@ function applySafetyOverride(
     };
   }
 
-  /*
-   * URGENT:
-   *
-   * AI may say:
-   * - urgent
-   * - emergency
-   *
-   * But it may NOT downgrade the case to:
-   * - self-care
-   * - routine doctor review
-   */
   if (
     safety.level ===
     "urgent"
@@ -1812,10 +1723,7 @@ function applySafetyOverride(
       ...assessment,
 
       urgency:
-        finalUrgency ===
-        "self-care"
-          ? "urgent"
-          : finalUrgency,
+        finalUrgency,
 
       urgencyReason:
         finalUrgency ===
@@ -1840,44 +1748,12 @@ function applySafetyOverride(
     };
   }
 
-  /*
-   * NO deterministic escalation.
-   *
-   * AI urgency is preserved.
-   */
   return assessment;
 }
 
 /* -------------------------------------------------------------------------- */
 /*                   Reported Health Condition Trend Score                     */
 /* -------------------------------------------------------------------------- */
-
-/**
- * PRODUCT SEMANTICS
- * -----------------
- *
- * healthTrendScore is:
- *
- * - NOT a diagnosis
- * - NOT disease probability
- * - NOT clinical risk percentage
- * - NOT AI assessed risk
- * - NOT a medically validated score
- *
- * It is a consistent longitudinal indicator based
- * only on information reported during a symptom check.
- *
- * Higher score = better reported condition.
- * Lower score  = worse reported condition.
- *
- * It is completely separate from condition.likelihood.
- *
- * condition.likelihood:
- *     0-100 Symptom Match Strength
- *
- * healthTrendScore:
- *     0-100 Health Condition Trend
- */
 
 export type HealthTrendUrgency =
   | "self-care"
@@ -1886,6 +1762,11 @@ export type HealthTrendUrgency =
   | "emergency";
 
 export type HealthTrendInput = {
+  /**
+   * Patient-reported severity, 1-10.
+   *
+   * This is NOT condition likelihood.
+   */
   severity?: number;
 
   urgency: HealthTrendUrgency;
@@ -1895,22 +1776,6 @@ export type HealthTrendInput = {
   worsening?: boolean;
 };
 
-/**
- * Converts self-reported severity to baseline.
- *
- * 1  -> 92
- * 2  -> 84
- * 3  -> 76
- * 4  -> 68
- * 5  -> 60
- * 6  -> 52
- * 7  -> 44
- * 8  -> 36
- * 9  -> 28
- * 10 -> 20
- *
- * Missing severity -> 70.
- */
 function severityBaseline(
   severity?: number,
 ): number {
@@ -1921,6 +1786,10 @@ function severityBaseline(
       severity,
     )
   ) {
+    /*
+     * Missing self-reported severity:
+     * neutral baseline.
+     */
     return 70;
   }
 
@@ -1941,11 +1810,6 @@ function severityBaseline(
   );
 }
 
-/**
- * Urgency penalty.
- *
- * urgent != emergency.
- */
 function urgencyPenalty(
   urgency: HealthTrendUrgency,
 ): number {
@@ -1967,11 +1831,6 @@ function urgencyPenalty(
   }
 }
 
-/**
- * Red-flag penalty.
- *
- * Maximum penalty = 30.
- */
 function redFlagPenalty(
   redFlagCount: number,
 ): number {
@@ -1993,12 +1852,6 @@ function redFlagPenalty(
   );
 }
 
-/**
- * Modest worsening penalty.
- *
- * Worsening alone NEVER automatically
- * means urgent/emergency.
- */
 function worseningPenalty(
   worsening: boolean,
 ): number {
@@ -2008,14 +1861,18 @@ function worseningPenalty(
 }
 
 /**
- * Calculate reported health-condition trend.
+ * Server-authoritative Health Condition Trend.
+ *
+ * IMPORTANT:
+ *
+ * This score is NOT:
+ * - diagnosis
+ * - disease probability
+ * - clinical risk percentage
+ * - medically validated score
  *
  * Higher = better reported condition.
- * Lower  = worse reported condition.
- *
- * This function is deterministic and does not
- * use AI output other than the final normalized
- * urgency supplied by the server.
+ * Lower = worse reported condition.
  */
 export function calculateHealthTrendScore(
   input: HealthTrendInput,
@@ -2052,23 +1909,10 @@ export function calculateHealthTrendScore(
 }
 
 /**
- * Convenience helper for the FINAL server assessment.
+ * Calculate the final trend score ONLY after the
+ * final deterministic safety override has been applied.
  *
- * IMPORTANT:
- *
- * The score is calculated from:
- *
- * - final server-normalized assessment urgency
- * - deterministic safety findings
- * - patient-reported severity
- * - patient-reported worsening
- *
- * It does NOT use:
- *
- * - question wording
- * - AI likelihood values
- * - condition riskLevel
- * - patient profile background
+ * This is the central Step 2 pipeline.
  */
 export function calculateHealthTrendFromAssessment(
   input: {
@@ -2083,73 +1927,29 @@ export function calculateHealthTrendFromAssessment(
     worsening?: boolean;
   },
 ): number {
-  return calculateHealthTrendScore(
-    {
-      urgency:
-        input.assessment
-          .urgency,
+  return calculateHealthTrendScore({
+    urgency:
+      input.assessment
+        .urgency,
 
-      redFlagCount:
-        input.safety.hits
-          .length,
+    redFlagCount:
+      input.safety.hits
+        .length,
 
-      ...(input.severity !== undefined
-        ? {
-            severity:
-              input.severity,
-          }
-        : {}),
+    ...(input.severity !== undefined
+      ? {
+          severity:
+            input.severity,
+        }
+      : {}),
 
-      ...(input.worsening !== undefined
-        ? {
-            worsening:
-              input.worsening,
-          }
-        : {}),
-    },
-  );
-}
-
-/**
- * Attach the server-calculated Health Condition
- * Trend score to a final Assessment.
- *
- * This is the ONLY normal path by which an
- * AssessmentResult receives healthTrendScore.
- */
-function withHealthTrendScore(
-  assessment: Assessment,
-  safety: ReturnType<
-    typeof safetyScreen
-  >,
-  severity?: number,
-  worsening?: boolean,
-): AssessmentResult {
-  const healthTrendScore =
-    calculateHealthTrendFromAssessment(
-      {
-        assessment,
-        safety,
-        ...(severity !== undefined
-          ? {
-              severity,
-            }
-          }
-          : {}),
-        ...(worsening !== undefined
-          ? {
-              worsening,
-            }
-          }
-          : {}),
-      },
-    );
-
-  return {
-    ...assessment,
-
-    healthTrendScore,
-  };
+    ...(input.worsening !== undefined
+      ? {
+          worsening:
+            input.worsening,
+        }
+      : {}),
+  });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -2172,7 +1972,7 @@ export const assessSymptoms =
     .handler(
       async ({
         data,
-      }) => {
+      }): Promise<AssessmentResult> => {
         const safetyInput: SafetyInput =
           {
             symptoms:
@@ -2215,12 +2015,10 @@ export const assessSymptoms =
           );
 
         /*
-         * CRITICAL CASE:
+         * Critical cases never enter AI differential.
          *
-         * Never send to AI differential.
-         *
-         * The emergency Assessment is still wrapped
-         * with a server-calculated trend score.
+         * The trend score is still calculated SERVER-SIDE
+         * from the authoritative emergency assessment.
          */
         if (
           safety.level ===
@@ -2233,16 +2031,34 @@ export const assessSymptoms =
 
           if (!emergency) {
             throw new Error(
-              "Unable to create the emergency assessment.",
+              "Unable to create emergency assessment.",
             );
           }
 
-          return withHealthTrendScore(
-            emergency,
-            safety,
-            data.severity,
-            false,
-          );
+          const healthTrendScore =
+            calculateHealthTrendFromAssessment(
+              {
+                severity:
+                  data.severity,
+
+                assessment:
+                  emergency,
+
+                safety,
+
+                worsening:
+                  isWorsening(
+                    data.symptoms,
+                    data.answers,
+                  ),
+              },
+            );
+
+          return {
+            ...emergency,
+
+            healthTrendScore,
+          };
         }
 
         const worsening =
@@ -2296,10 +2112,6 @@ export const assessSymptoms =
             data.language,
           );
 
-        /*
-         * Deterministic safety ALWAYS comes
-         * after AI normalization.
-         */
         assessment =
           applySafetyOverride(
             assessment,
@@ -2307,14 +2119,6 @@ export const assessSymptoms =
             data.language,
           );
 
-        /*
-         * Validate the normalized result.
-         *
-         * The validator is advisory/structural here.
-         *
-         * The deterministic safety result is still
-         * authoritative for the safety layer.
-         */
         assessment =
           validateAssessment({
             assessment,
@@ -2327,6 +2131,7 @@ export const assessSymptoms =
               ),
             language:
               data.language,
+
             ...(data.age !==
             undefined
               ? {
@@ -2334,30 +2139,44 @@ export const assessSymptoms =
                     data.age,
                 }
               : {}),
+
             hasUnknownHistory:
               false,
+
             contradictionUnresolved:
               false,
+
             worseningOverride:
               worsening,
           }).assessment as Assessment;
 
         /*
-         * STEP 2:
+         * IMPORTANT:
          *
-         * Calculate Health Condition Trend ONLY
-         * AFTER the complete server-side assessment
-         * pipeline has finished.
+         * Calculate AFTER validation and safety override.
          *
-         * Therefore the score uses the FINAL
-         * normalized/validated urgency.
+         * This means the saved/displayed trend always reflects
+         * the final server-authoritative urgency.
          */
-        return withHealthTrendScore(
-          assessment,
-          safety,
-          data.severity,
-          worsening,
-        );
+        const healthTrendScore =
+          calculateHealthTrendFromAssessment(
+            {
+              severity:
+                data.severity,
+
+              assessment,
+
+              safety,
+
+              worsening,
+            },
+          );
+
+        return {
+          ...assessment,
+
+          healthTrendScore,
+        };
       },
     );
 
@@ -2382,7 +2201,7 @@ export const assessPatientSymptoms =
       async ({
         data,
         context,
-      }) => {
+      }): Promise<AssessmentResult> => {
         const userId =
           context.userId;
 
@@ -2393,15 +2212,7 @@ export const assessPatientSymptoms =
         }
 
         /*
-         * SECURITY:
-         *
-         * Browser cannot provide the profile.
-         *
-         * The server:
-         *
-         * 1. authenticates the user
-         * 2. verifies patient ownership
-         * 3. retrieves the profile
+         * Patient profile is retrieved ONLY on server.
          */
         const profile =
           await getOwnedPatientProfile(
@@ -2438,11 +2249,10 @@ export const assessPatientSymptoms =
               : {}),
 
             /*
-             * Age may influence deterministic
-             * rules.
+             * Only age is passed to deterministic safety.
              *
-             * Other profile fields are NOT
-             * passed into safety detection.
+             * Other profile fields are background context,
+             * never red-flag evidence.
              */
             ...(profile.age !==
             null
@@ -2459,12 +2269,8 @@ export const assessPatientSymptoms =
           );
 
         /*
-         * CRITICAL PATIENT CASE:
-         *
-         * Bypass AI differential.
-         *
-         * Still return a server-calculated
-         * Health Condition Trend score.
+         * Critical patient case:
+         * bypass AI differential.
          */
         if (
           safety.level ===
@@ -2477,16 +2283,34 @@ export const assessPatientSymptoms =
 
           if (!emergency) {
             throw new Error(
-              "Unable to create the emergency assessment.",
+              "Unable to create emergency patient assessment.",
             );
           }
 
-          return withHealthTrendScore(
-            emergency,
-            safety,
-            data.severity,
-            false,
-          );
+          const healthTrendScore =
+            calculateHealthTrendFromAssessment(
+              {
+                severity:
+                  data.severity,
+
+                assessment:
+                  emergency,
+
+                safety,
+
+                worsening:
+                  isWorsening(
+                    data.symptoms,
+                    data.answers,
+                  ),
+              },
+            );
+
+          return {
+            ...emergency,
+
+            healthTrendScore,
+          };
         }
 
         const worsening =
@@ -2529,8 +2353,7 @@ export const assessPatientSymptoms =
                 : {}),
 
               /*
-               * Pregnancy context is included
-               * only for female patients.
+               * Pregnancy is included only for female patients.
                */
               ...(profile.sex
                 ?.trim()
@@ -2581,6 +2404,7 @@ export const assessPatientSymptoms =
               ),
             language:
               data.language,
+
             ...(profile.age !==
             null
               ? {
@@ -2588,31 +2412,43 @@ export const assessPatientSymptoms =
                     profile.age,
                 }
               : {}),
+
             hasUnknownHistory:
               !profile.allergies?.trim() ||
               !profile.existing_conditions?.trim() ||
               !profile.current_medications?.trim(),
+
             contradictionUnresolved:
               false,
+
             worseningOverride:
               worsening,
           }).assessment as Assessment;
 
         /*
-         * STEP 2:
+         * Server-authoritative trend for this specific patient.
          *
-         * Patient trend score is calculated from
-         * this patient's own final assessment only.
-         *
-         * No self history data is read here.
-         * No other patient's history is read here.
+         * No self-history data is involved.
          */
-        return withHealthTrendScore(
-          assessment,
-          safety,
-          data.severity,
-          worsening,
-        );
+        const healthTrendScore =
+          calculateHealthTrendFromAssessment(
+            {
+              severity:
+                data.severity,
+
+              assessment,
+
+              safety,
+
+              worsening,
+            },
+          );
+
+        return {
+          ...assessment,
+
+          healthTrendScore,
+        };
       },
     );
 
@@ -2679,8 +2515,7 @@ export const clarifyAnswers =
           );
 
         /*
-         * Never delay a critical case
-         * for clarification.
+         * Never delay a critical case for clarification.
          */
         if (
           safety.level ===
@@ -2717,13 +2552,14 @@ export const clarifyAnswers =
           );
 
         const clarification =
-          ClarificationSchema
-            .parse(raw)
-            .clarification;
+          ClarificationSchema.parse(
+            raw,
+          ).clarification;
 
         return clarification
           ? {
               ...clarification,
+
               id: "clarification-1",
             }
           : clarification;
@@ -2734,9 +2570,6 @@ export const clarifyAnswers =
 /*                       Patient history carry-over                            */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Normalize words for conservative complaint matching.
- */
 function meaningfulComplaintWords(
   value: string,
 ): Set<string> {
@@ -2789,14 +2622,6 @@ function meaningfulComplaintWords(
   );
 }
 
-/**
- * Complaint-aware carry-over.
- *
- * A previous symptom history should not influence
- * a completely unrelated complaint.
- *
- * Generic words such as "pain" are ignored.
- */
 export function hasComplaintCarryover(
   currentSymptoms: string,
 
@@ -2838,20 +2663,13 @@ export function hasComplaintCarryover(
             ),
         ).length;
 
-      /*
-       * Require at least two meaningful
-       * overlapping terms.
-       *
-       * This prevents generic words from
-       * linking unrelated complaints.
-       */
       return overlap >= 2;
     },
   );
 }
 
 /* -------------------------------------------------------------------------- */
-/*                               Final exports                                 */
+/*                               Exports                                       */
 /* -------------------------------------------------------------------------- */
 
 export type {
