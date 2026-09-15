@@ -21,10 +21,11 @@ const UrgencySchema = z.enum([
 ]);
 
 /**
- * Symptom Match Strength
+ * Existing metric:
  *
- * 0–100 relative symptom-match score.
- * This is NOT diagnostic probability or clinical risk.
+ * 0-100 Symptom Match Strength.
+ *
+ * This is NOT diagnostic probability.
  */
 const MatchStrengthSchema = z
   .number()
@@ -32,14 +33,14 @@ const MatchStrengthSchema = z
   .max(100);
 
 /**
- * Health Condition Trend
+ * Health Condition Trend.
  *
- * 0–100 independent non-clinical trend indicator.
+ * Legacy records may contain NULL.
  *
- * Higher = better reported condition.
- * Lower = worse reported condition.
- *
- * null = legacy record with no trend value.
+ * IMPORTANT:
+ * SaveCheck no longer trusts this value as the
+ * source of truth. New values are calculated
+ * server-side inside this file.
  */
 const HealthTrendScoreSchema = z
   .number()
@@ -53,9 +54,10 @@ const AnswerSchema = z.object({
   answer: z.string(),
 });
 
-type HistoryAnswer = z.infer<
-  typeof AnswerSchema
->;
+type HistoryAnswer =
+  z.infer<
+    typeof AnswerSchema
+  >;
 
 /* -------------------------------------------------------------------------- */
 /*                             Save Check Schema                              */
@@ -75,25 +77,31 @@ const SaveCheckSchema = z
       .default(""),
 
     /**
-     * Existing database field.
+     * Existing DB metric.
      *
-     * This is Symptom Match Strength.
-     * It is NOT diagnostic probability.
+     * Symptom Match Strength.
      */
-    severity: MatchStrengthSchema
-      .optional()
-      .default(0),
+    severity:
+      MatchStrengthSchema
+        .optional()
+        .default(0),
 
     /**
-     * Independent Health Condition Trend.
+     * Kept for backwards client compatibility.
      *
-     * null is deliberately accepted for legacy/no-trend records.
+     * IMPORTANT:
+     * New saves do NOT trust this value.
+     *
+     * The server calculates its own trend score below.
      */
     healthTrendScore:
       HealthTrendScoreSchema,
 
-    urgency: UrgencySchema
-      .default("self-care"),
+    urgency:
+      UrgencySchema
+        .default(
+          "self-care",
+        ),
 
     topCondition: z
       .string()
@@ -148,11 +156,6 @@ const SaveCheckSchema = z
       .optional()
       .default(""),
 
-    /**
-     * JSON-compatible vitals object.
-     *
-     * The checker currently sends a plain object.
-     */
     vitals: z
       .record(
         z.string(),
@@ -161,9 +164,10 @@ const SaveCheckSchema = z
       .optional()
       .nullable(),
 
-    subjectType: SubjectTypeSchema
-      .optional()
-      .default("self"),
+    subjectType:
+      SubjectTypeSchema
+        .optional()
+        .default("self"),
 
     patientId: z
       .string()
@@ -182,8 +186,13 @@ const SaveCheckSchema = z
           undefined
       ) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["patientId"],
+          code:
+            z.ZodIssueCode.custom,
+
+          path: [
+            "patientId",
+          ],
+
           message:
             "Self checks cannot contain a patient ID.",
         });
@@ -195,8 +204,13 @@ const SaveCheckSchema = z
         !value.patientId
       ) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["patientId"],
+          code:
+            z.ZodIssueCode.custom,
+
+          path: [
+            "patientId",
+          ],
+
           message:
             "A patient ID is required for a patient check.",
         });
@@ -204,10 +218,11 @@ const SaveCheckSchema = z
     },
   );
 
-const PatientIdSchema = z.object({
-  patientId:
-    z.string().uuid(),
-});
+const PatientIdSchema =
+  z.object({
+    patientId:
+      z.string().uuid(),
+  });
 
 /* -------------------------------------------------------------------------- */
 /*                                   Types                                    */
@@ -236,17 +251,13 @@ export type HistoryCheck = {
 
   /**
    * Symptom Match Strength.
-   *
-   * 0–100.
    */
   severity: number;
 
   /**
    * Health Condition Trend.
    *
-   * 0–100.
-   *
-   * null = legacy record without trend data.
+   * null = legacy record with no saved trend.
    */
   healthTrendScore:
     | number
@@ -272,7 +283,9 @@ export type HistoryCheck = {
 
   nextStep: string;
 
-  vitals: Json | null;
+  vitals:
+    | Json
+    | null;
 
   subjectType:
     HistorySubjectType;
@@ -364,6 +377,7 @@ function normalizeAnswers(
       (item) => ({
         question:
           item.question,
+
         answer:
           item.answer,
       }),
@@ -430,6 +444,167 @@ function normalizeVitals(
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/*                       Trend calculation — server only                     */
+/* -------------------------------------------------------------------------- */
+
+type TrendUrgency =
+  | "self-care"
+  | "see-a-doctor"
+  | "urgent"
+  | "emergency";
+
+/**
+ * Same Health Condition Trend formula used by the
+ * assessment pipeline.
+ *
+ * IMPORTANT:
+ *
+ * severity here means patient-reported severity
+ * only if available.
+ *
+ * The existing DB `severity` field is Symptom Match
+ * Strength, so it MUST NOT be used as self-rated severity.
+ *
+ * Therefore new history saves intentionally use a
+ * neutral severity baseline.
+ */
+function calculateServerHealthTrendScore(
+  input: {
+    urgency: TrendUrgency;
+
+    redFlagCount: number;
+
+    worsening: boolean;
+  },
+): number {
+  /*
+   * Neutral baseline because the history schema's
+   * existing `severity` field is NOT patient severity.
+   */
+  const baseline = 70;
+
+  let urgencyPenalty = 0;
+
+  switch (
+    input.urgency
+  ) {
+    case "self-care":
+      urgencyPenalty = 0;
+      break;
+
+    case "see-a-doctor":
+      urgencyPenalty = 6;
+      break;
+
+    case "urgent":
+      urgencyPenalty = 18;
+      break;
+
+    case "emergency":
+      urgencyPenalty = 45;
+      break;
+
+    default:
+      urgencyPenalty = 0;
+  }
+
+  const safeRedFlagCount =
+    Math.max(
+      0,
+      Math.floor(
+        Number.isFinite(
+          input.redFlagCount,
+        )
+          ? input.redFlagCount
+          : 0,
+      ),
+    );
+
+  const redFlagPenalty =
+    Math.min(
+      30,
+      safeRedFlagCount *
+        10,
+    );
+
+  const worseningPenalty =
+    input.worsening
+      ? 8
+      : 0;
+
+  return Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(
+        baseline -
+          urgencyPenalty -
+          redFlagPenalty -
+          worseningPenalty,
+      ),
+    ),
+  );
+}
+
+/**
+ * Worsening is derived ONLY from patient-reported
+ * symptom text and patient answers.
+ *
+ * Question text is deliberately ignored.
+ */
+const WORSENING_PATTERNS = [
+  /\bworse\b|\bworsening\b|\bdeteriorat/i,
+
+  /\bnot improving\b|\bno better\b|\bgetting bad\b|\bgetting worse\b/i,
+
+  /খারাপ হচ্ছে|আরও খারাপ|উন্নতি হচ্ছে না|অবনতি হচ্ছে|অবস্থা খারাপ/,
+];
+
+function detectReportedWorsening(
+  symptoms: string,
+  answers: HistoryAnswer[],
+): boolean {
+  const text = [
+    symptoms,
+
+    ...answers.map(
+      (item) =>
+        item.answer,
+    ),
+  ].join("\n");
+
+  return WORSENING_PATTERNS.some(
+    (pattern) =>
+      pattern.test(text),
+  );
+}
+
+/**
+ * Only deterministic-looking stored red flags are counted
+ * for the server-side trend pipeline.
+ *
+ * We use the actual red_flags array plus the red_flag boolean.
+ */
+function countStoredRedFlags(
+  redFlag: boolean,
+  redFlags: string[],
+): number {
+  if (
+    redFlags.length >
+    0
+  ) {
+    return Math.max(
+      redFlags.length,
+      redFlag ? 1 : 0,
+    );
+  }
+
+  return redFlag
+    ? 1
+    : 0;
+}
+
 function mapHistoryRow(
   row: any,
 ): HistoryCheck {
@@ -456,8 +631,9 @@ function mapHistoryRow(
       row.duration ?? "",
 
     /**
-     * Existing metric remains completely
-     * independent from Health Condition Trend.
+     * Existing metric remains unchanged.
+     *
+     * This is Symptom Match Strength.
      */
     severity:
       clampScore(
@@ -465,10 +641,9 @@ function mapHistoryRow(
       ),
 
     /**
-     * IMPORTANT:
+     * NEVER fallback to severity.
      *
-     * Do not use severity as fallback.
-     * Legacy records remain null.
+     * Old records without a trend remain null.
      */
     healthTrendScore:
       row.health_trend_score ===
@@ -539,9 +714,10 @@ function mapHistoryRow(
   };
 }
 
-/**
- * Server-side patient ownership verification.
- */
+/* -------------------------------------------------------------------------- */
+/*                    Server-side patient ownership                            */
+/* -------------------------------------------------------------------------- */
+
 async function verifyOwnedPatient(
   supabase: SupabaseClient,
   userId: string,
@@ -587,52 +763,54 @@ async function verifyOwnedPatient(
 export const listChecks =
   createServerFn({
     method: "GET",
-  }).handler(async () => {
-    const {
-      supabase,
-      user,
-    } =
-      await requireSupabaseAuth();
+  }).handler(
+    async () => {
+      const {
+        supabase,
+        user,
+      } =
+        await requireSupabaseAuth();
 
-    const {
-      data,
-      error,
-    } = await supabase
-      .from(
-        "symptom_checks",
-      )
-      .select("*")
-      .eq(
-        "user_id",
-        user.id,
-      )
-      .eq(
-        "subject_type",
-        "self",
-      )
-      .is(
-        "patient_id",
-        null,
-      )
-      .order(
-        "created_at",
-        {
-          ascending: true,
-        },
+      const {
+        data,
+        error,
+      } = await supabase
+        .from(
+          "symptom_checks",
+        )
+        .select("*")
+        .eq(
+          "user_id",
+          user.id,
+        )
+        .eq(
+          "subject_type",
+          "self",
+        )
+        .is(
+          "patient_id",
+          null,
+        )
+        .order(
+          "created_at",
+          {
+            ascending: true,
+          },
+        );
+
+      if (error) {
+        throw new Error(
+          `Unable to load self history: ${error.message}`,
+        );
+      }
+
+      return (
+        data ?? []
+      ).map(
+        mapHistoryRow,
       );
-
-    if (error) {
-      throw new Error(
-        `Unable to load self history: ${error.message}`,
-      );
-    }
-
-    return (
-      data ?? []
-    ).map(
-      mapHistoryRow,
-    );
-  });
+    },
+  );
 
 /* -------------------------------------------------------------------------- */
 /*                             Patient History                                */
@@ -723,12 +901,6 @@ export const saveCheck =
         } =
           await requireSupabaseAuth();
 
-        /**
-         * The validator has already executed,
-         * but parse again so this function remains
-         * safe if its implementation is called
-         * through another generated client boundary.
-         */
         const parsed =
           SaveCheckSchema.parse(
             data,
@@ -775,16 +947,15 @@ export const saveCheck =
           subjectType ===
           "self"
         ) {
-          /**
-           * Self records are ALWAYS detached
-           * from patient_profiles.
-           */
-          patientId = null;
+          patientId =
+            null;
         }
 
         const answers =
-          (parsed.answers ??
-            [])
+          (
+            parsed.answers ??
+            []
+          )
             .slice(0, 6)
             .map(
               (item) => ({
@@ -805,6 +976,51 @@ export const saveCheck =
                     ),
               }),
             );
+
+        const redFlags =
+          normalizeStringArray(
+            parsed.redFlags,
+          );
+
+        const redFlag =
+          Boolean(
+            parsed.redFlag,
+          );
+
+        /*
+         * IMPORTANT STEP 2:
+         *
+         * Do NOT trust parsed.healthTrendScore.
+         *
+         * It may have been sent by the browser and therefore
+         * cannot be treated as authoritative.
+         *
+         * The server independently derives the trend score
+         * from saved triage fields + patient-reported answers.
+         */
+        const worsening =
+          detectReportedWorsening(
+            parsed.symptoms,
+            answers,
+          );
+
+        const redFlagCount =
+          countStoredRedFlags(
+            redFlag,
+            redFlags,
+          );
+
+        const serverHealthTrendScore =
+          calculateServerHealthTrendScore(
+            {
+              urgency:
+                parsed.urgency,
+
+              redFlagCount,
+
+              worsening,
+            },
+          );
 
         const insertPayload = {
           user_id:
@@ -828,19 +1044,13 @@ export const saveCheck =
             ),
 
           /**
-           * Independent Health Condition Trend.
+           * SERVER-AUTHORITATIVE Health Condition Trend.
            *
-           * NULL remains NULL.
+           * Browser-supplied healthTrendScore is deliberately
+           * ignored for new saves.
            */
           health_trend_score:
-            parsed.healthTrendScore ===
-              null ||
-            parsed.healthTrendScore ===
-              undefined
-              ? null
-              : clampScore(
-                  parsed.healthTrendScore,
-                ),
+            serverHealthTrendScore,
 
           urgency:
             parsed.urgency,
@@ -856,14 +1066,10 @@ export const saveCheck =
           answers,
 
           red_flag:
-            Boolean(
-              parsed.redFlag,
-            ),
+            redFlag,
 
           red_flags:
-            normalizeStringArray(
-              parsed.redFlags,
-            ),
+            redFlags,
 
           categories:
             normalizeStringArray(
@@ -906,7 +1112,7 @@ export const saveCheck =
             insertPayload,
           )
           .select(
-            "id",
+            "id,health_trend_score",
           )
           .single();
 
@@ -924,13 +1130,23 @@ export const saveCheck =
           );
         }
 
-        /**
-         * Only after the database confirms the insert
-         * do we return success.
+        /*
+         * Return the actual inserted database ID and the
+         * actual server-calculated trend value.
          */
         return {
           id:
             inserted.id,
+
+          healthTrendScore:
+            inserted.health_trend_score ===
+              null ||
+            inserted.health_trend_score ===
+              undefined
+              ? null
+              : clampScore(
+                  inserted.health_trend_score,
+                ),
         };
       },
     );
@@ -1028,7 +1244,9 @@ export const deleteCheck =
         }
 
         return {
-          success: true,
+          success:
+            true,
+
           id:
             data.id,
         };
@@ -1042,51 +1260,56 @@ export const deleteCheck =
 export const getProfile =
   createServerFn({
     method: "GET",
-  }).handler(async () => {
-    const {
-      supabase,
-      user,
-    } =
-      await requireSupabaseAuth();
+  }).handler(
+    async () => {
+      const {
+        supabase,
+        user,
+      } =
+        await requireSupabaseAuth();
 
-    const {
-      data,
-      error,
-    } = await supabase
-      .from("profiles")
-      .select(
-        `
-          id,
-          name,
-          age,
-          sex
-        `,
-      )
-      .eq(
-        "id",
-        user.id,
-      )
-      .maybeSingle();
-
-    if (error) {
-      throw new Error(
-        `Unable to load profile: ${error.message}`,
-      );
-    }
-
-    return (
-      data ?? {
-        id:
+      const {
+        data,
+        error,
+      } = await supabase
+        .from("profiles")
+        .select(
+          `
+            id,
+            name,
+            age,
+            sex
+          `,
+        )
+        .eq(
+          "id",
           user.id,
-        name:
-          "",
-        age:
-          null,
-        sex:
-          null,
+        )
+        .maybeSingle();
+
+      if (error) {
+        throw new Error(
+          `Unable to load profile: ${error.message}`,
+        );
       }
-    );
-  });
+
+      return (
+        data ?? {
+          id:
+            user.id,
+
+          name:
+            "",
+
+          age:
+            null,
+
+          sex:
+            null,
+        }
+      );
+    },
+  );
 
 /* -------------------------------------------------------------------------- */
 /*                         Patient History Count                              */
@@ -1127,6 +1350,7 @@ export const getPatientHistoryCount =
             {
               count:
                 "exact",
+
               head:
                 true,
             },
