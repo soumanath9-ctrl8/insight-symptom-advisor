@@ -1916,7 +1916,7 @@ export function calculateHealthTrendScore(
  */
 export function calculateHealthTrendFromAssessment(
   input: {
-    severity?: number;
+    severity?: number | undefined;
 
     assessment: Assessment;
 
